@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "newio-kernel"
+version = "0.1.0"
+description = ""
+authors = ["guyskk <guyskk@qq.com>"]
+
+[[tool.poetry.source]]
+name = "local"
+url = "http://127.0.0.1:8501"
+
+[tool.poetry.dependencies]
+python = "*"
+pytest = "^3.5"
+newio = "^0.1.0"
+llist = "^0.5.0"
+
+[tool.poetry.dev-dependencies]
+pytest = "^3.5"
