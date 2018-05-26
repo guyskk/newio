@@ -1,5 +1,13 @@
+import time
 from types import coroutine
-from enum import Enum
+
+
+class TaskCanceled(Exception):
+    '''Task canceled'''
+
+
+class TaskTimeout(Exception):
+    '''Task timeout'''
 
 
 class FileDescriptor:
@@ -20,8 +28,8 @@ class FileDescriptor:
 
     def __init__(self, fileno: int):
         self._fileno = fileno
+        self._nio_ref_ = None
 
-    @property
     def fileno(self) -> int:
         return self._fileno
 
@@ -30,45 +38,40 @@ class FileDescriptor:
 
 
 class Timeout:
-    __slots__ = ('_seconds',)
 
-    def __init__(self, seconds: float):
-        self._seconds = seconds
-        self._set = False
+    def __init__(self, kernel_timeout):
+        self._nio_ref_ = kernel_timeout
+        kernel_timeout._nio_ref_ = self
 
     @property
     def seconds(self) -> float:
-        return self._seconds
+        return self._nio_ref_.seconds
 
     @property
-    def is_set(self):
-        return self._set
+    def deadline(self) -> float:
+        return self._nio_ref_.deadline
 
-    async def _nio_on_set_(self):
-        self._set = True
-
-    async def _nio_on_unset_(self):
-        self._set = False
+    @property
+    def is_expired(self) -> bool:
+        return self._nio_ref_.is_expired
 
     def __repr__(self):
-        return '<Timeout {:.3f}s>'.format(self.seconds)
+        if self.is_expired:
+            status = 'expired'
+        else:
+            remain = max(0, self.deadline - time.monotonic())
+            status = 'remain={:.3f}s'.format(remain)
+        return '<Timeout {:.3f}s {}>'.format(self.seconds, status)
 
 
 class Event:
 
     def __init__(self):
-        self._set = False
-
-    async def _nio_on_set_(self):
-        self._set = True
-
-    async def _nio_on_unset_(self):
-        self._set = False
+        self._nio_ref_ = None
 
     @property
     def is_set(self) -> bool:
-        '''check is event set'''
-        return self._set
+        return self._kernel_event.is_set
 
     async def wait(self):
         await nio_schedule_wait(self)
@@ -76,71 +79,50 @@ class Event:
     async def notify(self):
         await nio_schedule_notify(self)
 
-
-class TaskState(Enum):
-    INIT = 'init'
-    RUNNING = 'running'
-    STOPED = 'stoped'
+    def __repr__(self):
+        return '<Event@{} is_set={}>'.format(hex(id(self)), self.is_set)
 
 
 class Task:
-    '''
-    The Task class wraps a coroutine and provides some additional attributes
-    related to execution state and debugging.  Tasks are not normally
-    instantiated directly. Instead, use spawn().
-    '''
-
-    def __init__(self, coro, daemon=False):
-        self._coro = coro
-        self._daemon = daemon
-        self._name = getattr(coro, '__qualname__', str(coro))
-        self._ident = None
-        self._state = TaskState.INIT
-        self._result = None
-        self._error = None
-        self._stop_event = Event()
-
-    @property
-    def coroutine(self):
-        return self._coro
+    def __init__(self, kernel_task):
+        self._nio_ref_ = kernel_task
+        kernel_task._nio_ref_ = self
 
     @property
     def ident(self) -> int:
-        return self._ident
-
-    @property
-    def is_daemon(self) -> bool:
-        return self._daemon
+        return self._nio_ref_.ident
 
     @property
     def name(self) -> str:
-        return self._name
+        return self._nio_ref_.name
 
     @property
     def is_alive(self):
-        return self._state == TaskState.RUNNING
+        return self._nio_ref_.is_alive
 
-    async def _nio_on_start_(self, ident: int) -> None:
-        self._ident = ident
-        self._state = TaskState.RUNNING
+    @property
+    def result(self):
+        if self.is_alive:
+            raise RuntimeError('task is alive, can not get result')
+        return self._nio_ref_.result
 
-    async def _nio_on_stop_(self, result, error: Exception) -> None:
-        self._state = TaskState.STOPED
-        self._result = result
-        self._error = error
-        await self._stop_event.notify()
+    @property
+    def error(self):
+        if self.is_alive:
+            raise RuntimeError('task is alive, can not get error')
+        return self._nio_ref_.error
 
     def __repr__(self):
-        return '<Task#{} {}>'.format(self.ident, self.name)
-
-    async def start(self):
-        await nio_spawn(self)
+        if self.is_alive:
+            state = 'alive'
+        elif self.error:
+            state = 'error'
+        else:
+            state = 'result'
+        return '<Task#{} {} @{}>'.format(self.ident, self.name, state)
 
     async def join(self):
-        await self._stop_event.wait()
-        if self._error is not None:
-            raise self._error
-        return self.result
+        await nio_join(self)
 
     async def cancel(self):
         await nio_cancel(self)
@@ -162,13 +144,13 @@ def nio_sleep(seconds: float=0) -> None:
 
 
 @coroutine
-def nio_spawn(task: Task) -> None:
-    yield (nio_spawn, task)
+def nio_spawn(coro) -> Task:
+    return (yield (nio_spawn, coro))
 
 
 @coroutine
 def nio_current_task() -> Task:
-    yield (nio_current_task,)
+    return (yield (nio_current_task,))
 
 
 @coroutine
@@ -177,8 +159,13 @@ def nio_cancel(task: Task) -> None:
 
 
 @coroutine
-def nio_set_timeout(timeout: Timeout) -> None:
-    yield (nio_set_timeout, timeout)
+def nio_join(task: Task) -> None:
+    yield (nio_join, task)
+
+
+@coroutine
+def nio_set_timeout(seconds) -> Timeout:
+    return (yield (nio_set_timeout, seconds))
 
 
 @coroutine

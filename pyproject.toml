@@ -4,6 +4,10 @@ version = "0.1.0"
 description = ""
 authors = ["guyskk <guyskk@qq.com>"]
 
+[[tool.poetry.source]]
+name = "local"
+url = "http://127.0.0.1:8501"
+
 [tool.poetry.dependencies]
 python = "*"
 
