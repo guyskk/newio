@@ -9,6 +9,7 @@ __all__ = (
     'FileDescriptor', 'Event', 'Task',
     'wait_read', 'wait_write', 'sleep', 'spawn', 'current_task',
     'timeout', 'open_nursery', 'register_runner', 'run',
+    'run_in_thread', 'run_in_process',
 )
 
 LOG = logging.getLogger(__name__)
@@ -38,6 +39,16 @@ async def wait_read(fd: FileDescriptor) -> None:
 async def wait_write(fd: FileDescriptor) -> None:
     '''Wait until fd writeable'''
     await syscall.nio_wait_write(fd)
+
+
+async def run_in_thread(fn, *args, **kwargs):
+    '''Run fn in thread pool'''
+    await syscall.nio_run_in_thread(fn, *args, **kwargs)
+
+
+async def run_in_process(fn, *args, **kwargs):
+    '''Run fn in process pool'''
+    await syscall.nio_run_in_process(fn, *args, **kwargs)
 
 
 async def sleep(seconds: float) -> None:

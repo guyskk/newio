@@ -249,3 +249,25 @@ def nio_notify_event(event: Event) -> None:
         TaskCanceled: task canceled
     '''
     yield (nio_notify_event, event)
+
+
+@coroutine
+def nio_run_in_thread(fn, *args, **kwargs):
+    '''Run fn in thread pool
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
+    yield(nio_run_in_thread, fn, args, kwargs)
+
+
+@coroutine
+def nio_run_in_process(fn, *args, **kwargs):
+    '''Run fn in process pool
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
+    yield(nio_run_in_process, fn, args, kwargs)
