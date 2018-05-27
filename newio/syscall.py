@@ -1,43 +1,31 @@
+'''All syscalls are defined here for communicating with kernel
+
+Note on Implementation:
+
+    the **_nio_ref_** attributes is used to bind user object and kernel object,
+    so as to efficiently exchange between user space and kernel space.
+'''
 import time
 from types import coroutine
 
 
-class TaskCanceled(Exception):
-    '''Task canceled'''
-
-
-class TaskTimeout(Exception):
-    '''Task timeout'''
-
-
 class FileDescriptor:
-    '''
-    Wrapper class around an integer file descriptor. This is used
-    to take advantage of an I/O scheduling performance optimization
-    in the kernel. If a non-integer file object is given, the
-    kernel is able to reuse prior registrations on the event loop.
-    The reason this wrapper class is used is that even though an
-    integer file descriptor might be reused by the host OS,
-    instances of FileDescriptor will not be reused.
-    Thus, if a file is closed and a new file opened on the same descriptor,
-    it will be detected as a different file.
-
-    See also: https://github.com/dabeaz/curio/issues/104
-    '''
-    __slots__ = ('_fileno',)
+    '''A wrapper for file descriptor'''
 
     def __init__(self, fileno: int):
         self._fileno = fileno
         self._nio_ref_ = None
 
     def fileno(self) -> int:
+        '''Get the underlying file descriptor'''
         return self._fileno
 
     def __repr__(self):
-        return '<fd={!r}>'.format(self.fileno)
+        return f'<FileDescriptor#{self.fileno()}>'
 
 
 class Timeout:
+    '''A wrapper for kernel timeout object'''
 
     def __init__(self, kernel_timeout):
         self._nio_ref_ = kernel_timeout
@@ -45,14 +33,17 @@ class Timeout:
 
     @property
     def seconds(self) -> float:
+        '''timeout seconds'''
         return self._nio_ref_.seconds
 
     @property
     def deadline(self) -> float:
+        '''timeout deadline, based on time.monotonic()'''
         return self._nio_ref_.deadline
 
     @property
     def is_expired(self) -> bool:
+        '''is timeout expired'''
         return self._nio_ref_.is_expired
 
     def __repr__(self):
@@ -60,57 +51,76 @@ class Timeout:
             status = 'expired'
         else:
             remain = max(0, self.deadline - time.monotonic())
-            status = 'remain={:.3f}s'.format(remain)
-        return '<Timeout {:.3f}s {}>'.format(self.seconds, status)
+            status = f'remain={remain:.3f}s'
+        return f'<Timeout {self.seconds:.3f}s {status}>'
 
 
 class Event:
+    '''Event is a sychronization primitives used to coordinate tasks'''
 
     def __init__(self):
         self._nio_ref_ = None
 
     @property
-    def is_set(self) -> bool:
-        return self._kernel_event.is_set
+    def is_notified(self) -> bool:
+        '''is event notified'''
+        return self._nio_ref_.is_notified
 
-    async def wait(self):
-        await nio_schedule_wait(self)
+    async def wait(self) -> None:
+        '''Wait on the event'''
+        await nio_wait_event(self)
 
-    async def notify(self):
-        await nio_schedule_notify(self)
+    async def notify(self) -> None:
+        '''Notify the event'''
+        await nio_notify_event(self)
 
     def __repr__(self):
-        return '<Event@{} is_set={}>'.format(hex(id(self)), self.is_set)
+        return f'<Event@{hex(id(self))} is_notified={self.is_notified}>'
 
 
 class Task:
+    '''A wrapper for kernel task'''
+
     def __init__(self, kernel_task):
         self._nio_ref_ = kernel_task
         kernel_task._nio_ref_ = self
 
     @property
     def ident(self) -> int:
+        '''task id'''
         return self._nio_ref_.ident
 
     @property
     def name(self) -> str:
+        '''task name'''
         return self._nio_ref_.name
 
     @property
-    def is_alive(self):
+    def is_alive(self) -> bool:
+        '''is task alive'''
         return self._nio_ref_.is_alive
 
     @property
     def result(self):
+        '''Get task result after task stoped'''
         if self.is_alive:
             raise RuntimeError('task is alive, can not get result')
         return self._nio_ref_.result
 
     @property
     def error(self):
+        '''Get task error after task stoped'''
         if self.is_alive:
             raise RuntimeError('task is alive, can not get error')
         return self._nio_ref_.error
+
+    async def join(self) -> None:
+        '''Join the task'''
+        await nio_join(self)
+
+    async def cancel(self) -> None:
+        '''Cancel the task'''
+        await nio_cancel(self)
 
     def __repr__(self):
         if self.is_alive:
@@ -118,66 +128,124 @@ class Task:
         elif self.error:
             state = 'error'
         else:
-            state = 'result'
-        return '<Task#{} {} @{}>'.format(self.ident, self.name, state)
-
-    async def join(self):
-        await nio_join(self)
-
-    async def cancel(self):
-        await nio_cancel(self)
+            state = 'stoped'
+        return f'<Task#{self.ident} {self.name} @{state}>'
 
 
 @coroutine
 def nio_wait_read(fd: FileDescriptor) -> None:
+    '''Wait until fd readable
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
     yield (nio_wait_read, fd)
 
 
 @coroutine
 def nio_wait_write(fd: FileDescriptor) -> None:
+    '''Wait until fd writeable
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
     yield (nio_wait_write, fd)
 
 
 @coroutine
 def nio_sleep(seconds: float=0) -> None:
+    '''Sleep at least <sesonds> seconds
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
+    if seconds < 0:
+        raise ValueError('can not sleep a negative seconds')
     yield (nio_sleep, seconds)
 
 
 @coroutine
 def nio_spawn(coro) -> Task:
+    '''Spawn a task
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
     return (yield (nio_spawn, coro))
 
 
 @coroutine
 def nio_current_task() -> Task:
+    '''Get current task
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
     return (yield (nio_current_task,))
 
 
 @coroutine
 def nio_cancel(task: Task) -> None:
+    '''Cancel a task
+
+    This call will return immediately, before task stoped. This call will not
+    raise TaskCanceled, so it's safe to cancel multiple tasks one by one.
+    '''
     yield (nio_cancel, task)
 
 
 @coroutine
 def nio_join(task: Task) -> None:
+    '''Join a task, wait until the task stoped
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
     yield (nio_join, task)
 
 
 @coroutine
 def nio_set_timeout(seconds) -> Timeout:
+    '''Set a timeout for current task
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
+    if seconds < 0:
+        raise ValueError('can not set negative timeout')
     return (yield (nio_set_timeout, seconds))
 
 
 @coroutine
 def nio_unset_timeout(timeout: Timeout) -> None:
+    '''Unset a timeout for current task
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
     yield (nio_unset_timeout, timeout)
 
 
 @coroutine
-def nio_schedule_wait(event: Event) -> None:
-    yield (nio_schedule_wait, event)
+def nio_wait_event(event: Event) -> None:
+    '''Wait until event notifyed
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
+    yield (nio_wait_event, event)
 
 
 @coroutine
-def nio_schedule_notify(event: Event) -> None:
-    yield (nio_schedule_notify, event)
+def nio_notify_event(event: Event) -> None:
+    '''Notify a event
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
+    yield (nio_notify_event, event)
