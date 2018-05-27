@@ -4,6 +4,10 @@ import selectors
 from selectors import DefaultSelector
 from collections import deque
 from llist import dllist
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+from concurrent.futures import CancelledError as FutureCancelledError
+from queue import Queue as ThreadQueue
+from queue import Empty as QUEUE_EMPTY
 
 from newio.errors import TaskCanceled, TaskTimeout
 from newio.syscall import Event, Task, Timeout
@@ -100,6 +104,18 @@ class KernelEvent:
         user_event._nio_ref_ = self
         self.waiting_tasks = []
         self.is_notified = False
+        self.fn_future = None
+        self.fn_canceled = False
+
+    def cancel_fn(self):
+        '''try cancel the fn in executor, ignore cancel failed'''
+        if self.fn_future is None:
+            return
+        self.fn_canceled = True
+        LOG.debug('cancel fn of event %r', self)
+        if self.fn_future.done():
+            return
+        self.fn_future.cancel()
 
     def __repr__(self):
         return '<KernelEvent@{} is_notified={}>'.format(
@@ -114,6 +130,9 @@ class Kernel:
         self.ready_tasks = deque()
         self.selector = DefaultSelector()
         self.timer_wheel = TimerWheel(tick_duration=tick_duration)
+        self.thread_executor = ThreadPoolExecutor()
+        self.process_executor = ProcessPoolExecutor()
+        self.executor_messages = ThreadQueue()
         self.current = None
         self.main_task = None
 
@@ -172,11 +191,13 @@ class Kernel:
         factor_tasks = 0  # tasks_cost / poll_io_cost
         while self.tasks:
             t1 = time.monotonic()
-            self.timer_wheel.check()
+            self.timer_wheel.check()  # timer
+            self._run_ready_tasks()
+            self._check_executor_messages()  # executor
             self._run_ready_tasks()
             t2 = time.monotonic()
             time_poll = self.tick_duration / (1 + factor_timers + factor_tasks)
-            self._poll_io(time_poll)
+            self._poll_io(time_poll)  # poll_io
             t3 = time.monotonic()
             self._run_ready_tasks()
             t4 = time.monotonic()
@@ -242,6 +263,11 @@ class Kernel:
         task.error = error
         # cleanup
         self._selector_unregister(task)
+        if task.waiting_event is not None:
+            task.waiting_event.cancel_fn()
+        task.waiting_event = None
+        if task.waiting_timer is not None:
+            self.timer_wheel.stop_timer(task.waiting_timer)
         self.notify_user_event(task.stop_event)
         # unregister
         self.tasks.remove(task.node)
@@ -282,6 +308,10 @@ class Kernel:
     def _task_action_cancel(self):
         LOG.debug('throw cancel to task %r', self.current)
         self.current.throw_cancel()
+
+    def _task_action_throw(self, error):
+        LOG.debug('throw %r to task %r', error, self.current)
+        return self.current.throw(error)
 
     def _task_action_send(self, value=None):
         LOG.debug('send %r to task %r', value, self.current)
@@ -367,3 +397,53 @@ class Kernel:
 
     def nio_wait_write(self, user_fd):
         self._selector_register(self.current, user_fd, selectors.EVENT_WRITE)
+
+    def nio_run_in_thread(self, fn, args, kwargs):
+        self._run_in_executor(self.thread_executor, fn, args, kwargs)
+
+    def nio_run_in_process(self, fn, args, kwargs):
+        self._run_in_executor(self.process_executor, fn, args, kwargs)
+
+    def _run_in_executor(self, executor, fn, args, kwargs):
+        event = KernelEvent(Event())
+        fn_future = executor.submit(fn, *args, **kwargs)
+        event.fn_future = fn_future
+        fn_future.add_done_callback(self._on_fn_done(event))
+        self.nio_wait_event(event._nio_ref_)
+
+    def _on_fn_done(self, event):
+        def callback(fut):
+            LOG.debug('fn is done, future=%r, event=%r', fut, event)
+            try:
+                msg = (event, fut.result(), fut.exception())
+            except FutureCancelledError:
+                pass  # task already stoped, ignore the exception
+            else:
+                self.executor_messages.put(msg)
+        return callback
+
+    def _check_executor_messages(self):
+        while True:
+            try:
+                event, result, error = self.executor_messages.get_nowait()
+            except QUEUE_EMPTY:
+                break
+            else:
+                self._notify_fn_event(event, result, error)
+
+    def _notify_fn_event(self, event, result, error):
+        event.is_notified = True
+        if error is None:
+            LOG.debug('notify fn event %r', event)
+        else:
+            LOG.debug('notify fn event %r with error:', event, exc_info=error)
+        if event.fn_canceled:
+            return
+        if error is None:
+            for task in event.waiting_tasks:
+                task.waiting_event = None
+                self.schedule_task(task, self._task_action_send, result)
+        else:
+            for task in event.waiting_tasks:
+                task.waiting_event = None
+                self.schedule_task(task, self._task_action_throw, error)
