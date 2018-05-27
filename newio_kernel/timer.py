@@ -32,6 +32,8 @@ class KernelTimer:
 
 
 class TimerWheel:
+    '''A timer wheel based on Netty's implemention'''
+
     def __init__(self, tick_duration=0.010, ticks_per_wheel=1000):
         self.ticks_per_wheel = ticks_per_wheel
         self.tick_duration = tick_duration

@@ -8,6 +8,15 @@ python-versions = "*"
 platform = "*"
 
 [[package]]
+name = "invoke"
+version = "1.0.0"
+description = ""
+category = "dev"
+optional = false
+python-versions = "*"
+platform = "*"
+
+[[package]]
 name = "llist"
 version = "0.5"
 description = ""
@@ -82,10 +91,11 @@ platform = "*"
 [metadata]
 python-versions = "*"
 platform = "*"
-content-hash = "689c0ac3011e61edb806d8d77eb61cf3f2e634808a1b8732bdb52ac49b8a06d3"
+content-hash = "f23098f649d7495e1f51a51c587cb2242adc0466cdd4aa97c1145d126b5f769a"
 
 [metadata.hashes]
 attrs = [ "4b90b09eeeb9b88c35bc642cbac057e45a5fd85367b985bd2809c62b7b939265", "e0d0eb91441a3b53dab4d9b743eafc1ac44476296a2053b6ca3af0b139faf87b",]
+invoke = [ "4a4cc031db311cbfb3fdd8ec93a06c892533c27b931f4be14b24c97cd042b14e", "621b6564f992c37166e16090d7e7cccb3b922e03a58e980dfa5e543a931b652f", "21274204515dca62206470b088bbcf9d41ffda82b3715b90e01d71b7a4681921",]
 llist = [ "17381a8dcc59108fe1f0328300a22abc02edf66975ae79d7e89af3318bc777e1",]
 more-itertools = [ "0dd8f72eeab0d2c3bd489025bb2f6a1b8342f9b198f6fc37b52d15cfa4531fea", "c9ce7eccdcb901a2c75d326ea134e0886abfbea5f93e91cc95de9507c0816c44", "11a625025954c20145b37ff6309cd54e39ca94f72f6bb9576d1195db6fa2442e",]
 newio = [ "94b38841a241b3ecaed349b1b6062f80b2de58a18bab968d54f0a602d89e2141", "b5a725287ce1cb2eda426b7f0ffe830b0ba94679f8b7e3da8e179187871c2799",]
