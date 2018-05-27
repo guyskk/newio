@@ -12,6 +12,7 @@ url = "http://127.0.0.1:8501"
 python = "*"
 newio = "^0.1.0"
 llist = "^0.5.0"
+pytest-cov = "^2.5"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.5"
