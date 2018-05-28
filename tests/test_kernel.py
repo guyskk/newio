@@ -1,5 +1,6 @@
 import pytest
 import newio.api as nio
+from newio_kernel import run
 
 from .helper import run_it
 
@@ -16,7 +17,7 @@ def test_shutdown():
         await nio.sleep(1)
 
     with pytest.raises(KeyboardInterrupt):
-        nio.run(main())
+        run(main())
 
 
 @run_it
