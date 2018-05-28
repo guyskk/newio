@@ -145,10 +145,17 @@ class Kernel:
             self._run()
         except:
             self.shutdown()
+            self._close(wait=False)
             raise
+        else:
+            self._close()
         if self.main_task.error:
             raise self.main_task.error
         return self.main_task.result
+
+    def _close(self, wait=True):
+        self.thread_executor.shutdown(wait=wait)
+        self.process_executor.shutdown(wait=wait)
 
     async def kernel_main(self, coro, timeout):
         try:
