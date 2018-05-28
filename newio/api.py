@@ -8,27 +8,10 @@ __all__ = (
     'TaskCanceled', 'NewioError', 'TaskTimeout',
     'FileDescriptor', 'Event', 'Task',
     'wait_read', 'wait_write', 'sleep', 'spawn', 'current_task',
-    'timeout', 'open_nursery', 'register_runner', 'run',
-    'run_in_thread', 'run_in_process',
+    'timeout', 'open_nursery', 'run_in_thread', 'run_in_process',
 )
 
 LOG = logging.getLogger(__name__)
-
-_nio_runner = None
-
-
-def register_runner(runner):
-    global _nio_runner
-    if _nio_runner is not None:
-        raise RuntimeError(f'runner already registered by {_nio_runner!r}')
-    _nio_runner = runner
-
-
-def run(coro, timeout=None):
-    global _nio_runner
-    if _nio_runner is None:
-        raise RuntimeError('runner not registered yet')
-    return _nio_runner(coro, timeout=timeout)
 
 
 async def wait_read(fd: FileDescriptor) -> None:
