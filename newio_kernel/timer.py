@@ -67,7 +67,6 @@ class TimerWheel:
         ticks = int(duration / self.tick_duration)
         self.current_tick_time += ticks * self.tick_duration
         for _ in range(ticks):
-            self.current_tick = (self.current_tick + 1) % self.ticks_per_wheel
             timers = self.wheel[self.current_tick]
             node = timers.first
             while node:
@@ -80,3 +79,4 @@ class TimerWheel:
                 else:
                     timer.rounds -= 1
                 node = next_node
+            self.current_tick = (self.current_tick + 1) % self.ticks_per_wheel
