@@ -1,6 +1,4 @@
 '''Newio common API for users'''
-import logging
-
 from . import syscall
 from .syscall import TaskCanceled, TaskTimeout, FileDescriptor, Task
 
@@ -9,8 +7,6 @@ __all__ = (
     'wait_read', 'wait_write', 'sleep', 'spawn', 'current_task',
     'timeout', 'open_nursery', 'run_in_thread', 'run_in_process',
 )
-
-LOG = logging.getLogger(__name__)
 
 
 async def wait_read(fd: FileDescriptor) -> None:

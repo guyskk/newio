@@ -12,7 +12,7 @@ except ImportError:
     WantWrite = (BlockingIOError, InterruptedError)
 
 
-class Socket(object):
+class Socket:
     '''
     Non-blocking wrapper around a socket object.   The original socket is put
     into a non-blocking mode when it's wrapped.
