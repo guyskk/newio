@@ -109,7 +109,7 @@ class Event:
         if self._is_set:
             return
         self._is_set = True
-        await self.nio_futex_wake(self._futex, Futex.WAKE_ALL)
+        await self._futex.wake(Futex.WAKE_ALL)
 
     def clear(self):
         self._is_set = False
@@ -117,7 +117,7 @@ class Event:
     async def wait(self):
         if self._is_set:
             return
-        await self.nio_futex_wait(self._futex)
+        await self._futex.wait()
 
 
 class Barrier:
@@ -139,11 +139,11 @@ class Barrier:
         try:
             if self._count >= self._parties:
                 self._is_filled = True
-                await self.nio_futex_wake(self._futex, Futex.WAKE_ALL)
+                await self._futex.wake(Futex.WAKE_ALL)
                 if self._action is not None:
                     self._action()
             else:
-                await self.nio_futex_wait(self._futex)
+                await self._futex.wait()
         except BaseException:
             self._is_broken = True
             raise
@@ -160,4 +160,4 @@ class Barrier:
     async def abort(self):
         self._is_broken = True
         if self._count > 0:
-            await self.nio_futex_wake(self._futex, Futex.WAKE_ALL)
+            await self._futex.wake(Futex.WAKE_ALL)

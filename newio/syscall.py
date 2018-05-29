@@ -265,7 +265,7 @@ def nio_futex_wake(futex: Futex, n: int) -> None:
     Raises:
         TaskCanceled: task canceled
     '''
-    yield (nio_futex_wake, futex)
+    yield (nio_futex_wake, futex, n)
 
 
 @coroutine
