@@ -1,61 +1,31 @@
 import os
-import socket
-import newio as nio
-
-try:
-    from ssl import SSLWantReadError, SSLWantWriteError
-    WantRead = (BlockingIOError, InterruptedError, SSLWantReadError)
-    WantWrite = (BlockingIOError, InterruptedError, SSLWantWriteError)
-except ImportError:    # pragma: no cover
-    WantRead = (BlockingIOError, InterruptedError)
-    WantWrite = (BlockingIOError, InterruptedError)
+from newio import socket, spawn
 
 
-def fd(sock):
-    return nio.FileDescriptor(sock.fileno())
-
-
-async def echo_handler(client, address):
-    client.setblocking(False)
+def tcp_nodelay(sock):
     try:
         client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     except (OSError, NameError):
         pass
-    with client:
-        client_fd = fd(client)
+
+
+async def echo_handler(client, address):
+    tcp_nodelay(client)
+    async with client:
         while True:
-            try:
-                data = client.recv(102400)
-            except WantRead:
-                await nio.wait_read(client_fd)
-                data = client.recv(102400)
+            data = await client.recv(102400)
             if not data:
                 break
-            while data:
-                try:
-                    num = client.send(data)
-                except WantWrite:
-                    await nio.wait_write(client_fd)
-                    num = client.send(data)
-                data = data[num:]
+            await client.sendall(data)
 
 
 async def echo_server(host, port):
     print(f'Echo server pid={os.getpid()}, listening at tcp://{host}:{port}')
     server = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.setblocking(False)
-    try:
-        server.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    except (OSError, NameError):
-        pass
+    tcp_nodelay(server)
     server.bind((host, port))
     server.listen()
-    server_fd = fd(server)
     while True:
-        try:
-            client, address = server.accept()
-        except WantRead:
-            await nio.wait_read(server_fd)
-            client, address = server.accept()
-        await nio.spawn(echo_handler(client, address))
+        client, address = await server.accept()
+        await spawn(echo_handler(client, address))
