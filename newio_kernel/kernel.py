@@ -9,8 +9,10 @@ from concurrent.futures import CancelledError as FutureCancelledError
 from queue import Queue as ThreadQueue
 from queue import Empty as QUEUE_EMPTY
 
-from newio.errors import TaskCanceled, TaskTimeout
-from newio.syscall import Event, Task, Timeout
+from newio.syscall import TaskCanceled, TaskTimeout
+from newio.syscall import Task as UserTask
+from newio.syscall import Timeout as UserTimeout
+from newio.syscall import Futex as UserFutex
 
 from .timer import TimerWheel
 
@@ -51,6 +53,64 @@ class KernelFd:
             self.fileno(), self.task)
 
 
+class WaitingIO:
+
+    def __init__(self, fd):
+        self.fd = fd
+
+    def state(self):
+        if self.fd.events == selectors.EVENT_READ:
+            return 'wait_read'
+        elif self.fd.events == selectors.EVENT_WRITE:
+            return 'wait_write'
+        else:
+            return 'wait_io'
+
+    def clean(self, kernel):
+        if self.fd is not None and self.fd.selector_key is not None:
+            kernel.selector.unregister(self.fd)
+
+
+class WaitingExecutor:
+
+    def __init__(self, future):
+        self.future = future
+
+    def state(self):
+        return 'wait_executor'
+
+    def clean(self, kernel):
+        LOG.debug('cancel fn of %r', self)
+        if self.future.done():
+            return
+        self.future.cancel()
+
+
+class WaitingFutex:
+
+    def __init__(self, futex, node):
+        self.futex = futex
+        self.node = node
+
+    def state(self):
+        return 'wait_futex'
+
+    def clean(self, kernel):
+        if self.node in self.futex.waiters:
+            self.futex.waiters.remove(self.node)
+
+
+class WaitingTimer:
+    def __init__(self, timer):
+        self.timer = timer
+
+    def state(self):
+        return 'sleep'
+
+    def clean(self, kernel):
+        kernel.timer_wheel.stop_timer(self.timer)
+
+
 class KernelTask:
     def __init__(self, coro, *, ident):
         self._nio_ref_ = None
@@ -61,28 +121,17 @@ class KernelTask:
         self.name = getattr(coro, '__name__', str(coro))
         self.is_alive = True
         self.node = None
-        self.stop_event = Event()
+        self.stop_futex = KernelFutex(UserFutex())
         self.error = None
         self.result = None
-        self.waiting_fd = None
-        self.waiting_timer = None
-        self.waiting_event = None
+        self.waiting = None
 
     def __repr__(self):
         if self.is_alive:
-            if self.waiting_fd is not None:
-                if self.waiting_fd.events == selectors.EVENT_READ:
-                    state = 'wait_read'
-                elif self.waiting_fd.events == selectors.EVENT_WRITE:
-                    state = 'wait_write'
-                else:
-                    state = 'wait_io'
-            elif self.waiting_timer is not None:
-                state = 'sleep'
-            elif self.waiting_event is not None:
-                state = 'wait_event'
-            else:
+            if self.waiting is None:
                 state = 'ready'
+            else:
+                state = self.waiting.state()
         elif self.error:
             state = 'error'
         else:
@@ -97,29 +146,16 @@ class KernelTask:
         raise RuntimeError(message)
 
 
-class KernelEvent:
+class KernelFutex:
 
-    def __init__(self, user_event):
-        self._nio_ref_ = user_event
-        user_event._nio_ref_ = self
-        self.waiting_tasks = []
-        self.is_notified = False
-        self.fn_future = None
-        self.fn_canceled = False
-
-    def cancel_fn(self):
-        '''try cancel the fn in executor, ignore cancel failed'''
-        if self.fn_future is None:
-            return
-        self.fn_canceled = True
-        LOG.debug('cancel fn of event %r', self)
-        if self.fn_future.done():
-            return
-        self.fn_future.cancel()
+    def __init__(self, user_futex):
+        self._nio_ref_ = user_futex
+        user_futex._nio_ref_ = self
+        self.waiters = dllist()
 
     def __repr__(self):
-        return '<KernelEvent@{} is_notified={}>'.format(
-            hex(id(self._nio_ref_)), self.is_notified)
+        num = len(self.waiters)
+        return f'<KernelFutex@{hex(id(self._nio_ref_))} {num} waiters>'
 
 
 class Kernel:
@@ -269,33 +305,20 @@ class Kernel:
         task.result = result
         task.error = error
         # cleanup
-        self._selector_unregister(task)
-        if task.waiting_event is not None:
-            task.waiting_event.cancel_fn()
-        task.waiting_event = None
-        if task.waiting_timer is not None:
-            self.timer_wheel.stop_timer(task.waiting_timer)
-        self.notify_user_event(task.stop_event)
+        if task.waiting:
+            task.waiting.clean(self)
+            task.waiting = None
+        for wakeup_task in task.stop_futex.waiters:
+            if wakeup_task.is_alive:
+                self.schedule_task(wakeup_task, self._task_action_send)
+        task.stop_futex.waiters.clear()
         # unregister
         self.tasks.remove(task.node)
-
-    def notify_user_event(self, user_event):
-        event = user_event._nio_ref_
-        if event is None:
-            event = KernelEvent(user_event)
-        if event.is_notified:
-            LOG.debug('event %r already notified', event)
-            return
-        event.is_notified = True
-        LOG.debug('notify event %r', event)
-        for task in event.waiting_tasks:
-            task.waiting_event = None
-            self.schedule_task(task, self._task_action_send)
 
     def _timer_action_wakeup(self, timer):
         task = timer.task
         LOG.debug('task %r wakeup by %r', task, timer)
-        task.waiting_timer = None
+        task.waiting = None
         self.schedule_task(task, self._task_action_send)
 
     def _timer_action_timeout(self, timer):
@@ -327,13 +350,14 @@ class Kernel:
     def nio_sleep(self, seconds):
         timer = self.timer_wheel.start_timer(
             seconds, self._timer_action_wakeup, self.current)
-        self._selector_unregister(self.current)
-        self.current.waiting_timer = timer
+        if self.current.waiting:
+            self.current.waiting.clean(self)
+        self.current.waiting = WaitingTimer(timer)
 
     def nio_set_timeout(self, seconds):
         timer = self.timer_wheel.start_timer(
             seconds, self._timer_action_timeout, self.current)
-        user_timeout = Timeout(timer)
+        user_timeout = UserTimeout(timer)
         self.schedule_task(self.current, self._task_action_send, user_timeout)
 
     def nio_unset_timeout(self, user_timeout):
@@ -346,7 +370,7 @@ class Kernel:
 
     def nio_spawn(self, coro):
         task = self.start_task(coro)
-        user_task = Task(task)
+        user_task = UserTask(task)
         self.schedule_task(self.current, self._task_action_send, user_task)
 
     def nio_cancel(self, user_task):
@@ -357,34 +381,48 @@ class Kernel:
 
     def nio_join(self, user_task):
         task = user_task._nio_ref_
-        self.nio_wait_event(task.stop_event)
+        if task.is_alive:
+            self.nio_futex_wait(task.stop_futex._nio_ref_)
+        else:
+            self.schedule_task(self.current, self._task_action_send)
 
     def nio_current_task(self):
         user_task = self.current._nio_ref_
         self.schedule_task(self.current, self._task_action_send, user_task)
 
-    def nio_wait_event(self, user_event):
-        event = user_event._nio_ref_
-        if event is None:
-            event = KernelEvent(user_event)
-        if event.is_notified:
-            self.schedule_task(self.current, self._task_action_send)
-        else:
-            LOG.debug('task %r waiting for event %r', self.current, event)
-            event.waiting_tasks.append(self.current)
-            self._selector_unregister(self.current)
-            self.current.waiting_event = event
+    def nio_futex_wait(self, user_futex):
+        futex = user_futex._nio_ref_
+        if futex is None:
+            futex = KernelFutex(user_futex)
+        node = futex.waiters.append(self.current)
+        LOG.debug('task %r waiting for futex %r', self.current, futex)
+        if self.current.waiting:
+            self.current.waiting.clean(self)
+        self.current.waiting = WaitingFutex(futex, node)
 
-    def nio_notify_event(self, user_event):
-        self.notify_user_event(user_event)
+    def nio_futex_wake(self, user_futex, n):
+        futex = user_futex._nio_ref_
+        if futex is None:
+            futex = KernelFutex(user_futex)
+        if n == UserFutex.WAKE_ALL:
+            for task in futex.waiters:
+                if task.is_alive:
+                    self.schedule_task(task, self._task_action_send)
+            futex.waiters.clear()
+        else:
+            while futex.waiters and n > 0:
+                task = futex.popleft()
+                if task.is_alive:
+                    self.schedule_task(task, self._task_action_send)
+                    n -= 1
         self.schedule_task(self.current, self._task_action_send)
 
-    def _selector_unregister(self, task):
-        fd = task.waiting_fd
-        LOG.debug('selector unregister fd %r', fd)
-        if fd is not None and fd.selector_key is not None:
-            self.selector.unregister(fd)
-        task.waiting_fd = None
+    # def _selector_unregister(self, task):
+    #     fd = task.waiting_fd
+    #     LOG.debug('selector unregister fd %r', fd)
+    #     if fd is not None and fd.selector_key is not None:
+    #         self.selector.unregister(fd)
+    #     task.waiting_fd = None
 
     def _selector_register(self, task, user_fd, events):
         fd = user_fd._nio_ref_
@@ -397,7 +435,7 @@ class Kernel:
             fd.selector_key = self.selector.register(fd, events)
         elif fd.events != events:
             fd.selector_key = self.selector.modify(fd, events)
-        task.waiting_fd = fd
+        task.waiting = WaitingIO(fd)
 
     def nio_wait_read(self, user_fd):
         self._selector_register(self.current, user_fd, selectors.EVENT_READ)
@@ -412,17 +450,15 @@ class Kernel:
         self._run_in_executor(self.process_executor, fn, args, kwargs)
 
     def _run_in_executor(self, executor, fn, args, kwargs):
-        event = KernelEvent(Event())
-        fn_future = executor.submit(fn, *args, **kwargs)
-        event.fn_future = fn_future
-        fn_future.add_done_callback(self._on_fn_done(event))
-        self.nio_wait_event(event._nio_ref_)
+        fut = executor.submit(fn, *args, **kwargs)
+        fut.add_done_callback(self._on_fn_done(self.current))
+        self.current.waiting = WaitingExecutor(fut)
 
-    def _on_fn_done(self, event):
+    def _on_fn_done(self, task):
         def callback(fut):
-            LOG.debug('fn is done, future=%r, event=%r', fut, event)
+            LOG.debug('fn is done, future=%r, task=%r', fut, task)
             try:
-                msg = (event, fut.result(), fut.exception())
+                msg = (task, fut.result(), fut.exception())
             except FutureCancelledError:
                 pass  # task already stoped, ignore the exception
             else:
@@ -432,25 +468,21 @@ class Kernel:
     def _check_executor_messages(self):
         while True:
             try:
-                event, result, error = self.executor_messages.get_nowait()
+                task, result, error = self.executor_messages.get_nowait()
             except QUEUE_EMPTY:
                 break
             else:
-                self._notify_fn_event(event, result, error)
+                self._notify_fn_task(task, result, error)
 
-    def _notify_fn_event(self, event, result, error):
-        event.is_notified = True
+    def _notify_fn_task(self, task, result, error):
         if error is None:
-            LOG.debug('notify fn event %r', event)
+            LOG.debug('notify fn task %r', task)
         else:
-            LOG.debug('notify fn event %r with error:', event, exc_info=error)
-        if event.fn_canceled:
+            LOG.debug('notify fn task %r with error:', task, exc_info=error)
+        if not task.is_alive:
             return
         if error is None:
-            for task in event.waiting_tasks:
-                task.waiting_event = None
-                self.schedule_task(task, self._task_action_send, result)
+            self.schedule_task(task, self._task_action_send, result)
         else:
-            for task in event.waiting_tasks:
-                task.waiting_event = None
-                self.schedule_task(task, self._task_action_throw, error)
+            self.schedule_task(task, self._task_action_throw, error)
+        task.waiting = None

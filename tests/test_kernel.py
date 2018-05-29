@@ -1,5 +1,5 @@
 import pytest
-import newio.api as nio
+import newio as nio
 from newio_kernel import run
 
 from .helper import run_it

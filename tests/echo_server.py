@@ -1,6 +1,6 @@
 import os
 import socket
-import newio.api as nio
+import newio as nio
 
 try:
     from ssl import SSLWantReadError, SSLWantWriteError

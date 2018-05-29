@@ -1,4 +1,4 @@
-import newio.api as nio
+import newio as nio
 import time
 
 from .helper import run_it
@@ -12,10 +12,7 @@ async def test_timeout():
         try:
             await task.join()
         except nio.TaskTimeout as ex:
-            print(ex)
             await task.cancel()
-        except BaseException as ex:
-            print(ex)
     await task.join()
     cost = time.monotonic() - begin
     assert cost >= 0.1 and cost < 0.15

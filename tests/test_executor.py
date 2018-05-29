@@ -1,4 +1,4 @@
-import newio.api as nio
+import newio as nio
 import time
 
 from .helper import run_it
