@@ -1,6 +1,9 @@
 '''synchronization primitives'''
-from . import syscall
 from .syscall import Futex
+
+
+class BrokenBarrierError(RuntimeError):
+    '''Exception raised if the barrier is broken'''
 
 
 class Lock:
@@ -8,16 +11,22 @@ class Lock:
         self._is_locked = False
         self._futex = Futex()
 
+    async def __aenter__(self):
+        await self.acquire()
+
+    async def __aexit__(self, *exc_info):
+        await self.release()
+
     async def acquire(self):
         if self._is_locked:
-            await syscall.nio_futex_wait(self._futex)
+            await self._futex.wait()
         self._is_locked = True
 
     async def release(self):
         if not self._is_locked:
             raise RuntimeError('release unlocked lock')
         self._is_locked = False
-        await syscall.nio_futex_wake(self._futex, 1)
+        await self._futex.wake(1)
 
     def locked(self):
         return self._is_locked
@@ -28,10 +37,10 @@ class Condition:
         self._futex = Futex()
 
     async def wait(self):
-        await syscall.nio_futex_wait(self._futex)
+        await self._futex.wait()
 
     async def notify(self, n=1):
-        await syscall.nio_futex_wake(self._futex, n)
+        await self._futex.wake(n)
 
     async def notify_all(self):
         return self.notify(Futex.WAKE_ALL)
@@ -44,15 +53,21 @@ class Semaphore:
         self._value = value
         self._futex = Futex()
 
+    async def __aenter__(self):
+        await self.acquire()
+
+    async def __aexit__(self, *exc_info):
+        await self.release()
+
     async def acquire(self):
         if self._value <= 0:
-            await syscall.nio_futex_wait(self._futex)
+            await self._futex.wait()
         self._value -= 1
 
     async def release(self):
         self._value += 1
         if self._value == 1:
-            await syscall.nio_futex_wake(self._futex, 1)
+            await self._futex.wake(1)
 
 
 class BoundedSemaphore:
@@ -63,17 +78,23 @@ class BoundedSemaphore:
         self._init_value = value
         self._futex = Futex()
 
+    async def __aenter__(self):
+        await self.acquire()
+
+    async def __aexit__(self, *exc_info):
+        await self.release()
+
     async def acquire(self):
         if self._value <= 0:
-            await syscall.nio_futex_wait(self._futex)
+            await self._futex.wait()
         self._value -= 1
 
     async def release(self):
         if self._value >= self._init_value:
-            raise ValueError('semaphore released too many times')
+            raise RuntimeError('semaphore released too many times')
         self._value += 1
         if self._value == 1:
-            await syscall.nio_futex_wake(self._futex, 1)
+            await self._futex.wake(1)
 
 
 class Event:
@@ -97,10 +118,6 @@ class Event:
         if self._is_set:
             return
         await self.nio_futex_wait(self._futex)
-
-
-class BrokenBarrierError(Exception):
-    pass
 
 
 class Barrier:

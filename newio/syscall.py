@@ -9,6 +9,22 @@ import time
 from types import coroutine
 
 
+class TaskCanceled(BaseException):
+    '''
+    Exception raised when task cancelled.
+
+    It's used to unwind coroutine stack and cleanup resources,
+    the exception **MUST NOT** be catch without reraise.
+
+    The exception directly inherits from BaseException instead of Exception
+    so as to not be accidentally caught by code that catches Exception.
+    '''
+
+
+class TaskTimeout(Exception):
+    '''Exception raised when task timeout.'''
+
+
 class FileDescriptor:
     '''A wrapper for file descriptor'''
 
@@ -58,7 +74,7 @@ class Timeout:
 class Futex:
     '''
     Futex - fast userspace mutex, borrowing from Linux kernel.
-    It is a sychronization primitives used to coordinate tasks
+    It is a sychronization primitive used to coordinate tasks.
     '''
 
     # A symbol for wake all tasks
@@ -69,6 +85,14 @@ class Futex:
 
     def __repr__(self):
         return f'<Futex@{hex(id(self))}>'
+
+    async def wait(self):
+        '''Wait on the futex'''
+        await nio_futex_wait(self)
+
+    async def wake(self, n: int):
+        '''Wake up at most n tasks waiting on the futex'''
+        await nio_futex_wake(self, n)
 
 
 class Task:
