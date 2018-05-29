@@ -2,11 +2,11 @@ import logging
 
 from . import syscall
 from .errors import NewioError, TaskCanceled, TaskTimeout
-from .syscall import FileDescriptor, Event, Task
+from .syscall import FileDescriptor, Task
 
 __all__ = (
     'TaskCanceled', 'NewioError', 'TaskTimeout',
-    'FileDescriptor', 'Event', 'Task',
+    'FileDescriptor', 'Task',
     'wait_read', 'wait_write', 'sleep', 'spawn', 'current_task',
     'timeout', 'open_nursery', 'run_in_thread', 'run_in_process',
 )

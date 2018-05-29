@@ -1,6 +1,6 @@
 '''All syscalls are defined here for communicating with kernel
 
-Note on Implementation:
+Implementation Note:
 
     the **_nio_ref_** attributes is used to bind user object and kernel object,
     so as to efficiently exchange between user space and kernel space.
@@ -55,27 +55,20 @@ class Timeout:
         return f'<Timeout {self.seconds:.3f}s {status}>'
 
 
-class Event:
-    '''Event is a sychronization primitives used to coordinate tasks'''
+class Futex:
+    '''
+    Futex - fast userspace mutex, borrowing from Linux kernel.
+    It is a sychronization primitives used to coordinate tasks
+    '''
+
+    # A symbol for wake all tasks
+    WAKE_ALL = -1
 
     def __init__(self):
         self._nio_ref_ = None
 
-    @property
-    def is_notified(self) -> bool:
-        '''is event notified'''
-        return self._nio_ref_.is_notified
-
-    async def wait(self) -> None:
-        '''Wait on the event'''
-        await nio_wait_event(self)
-
-    async def notify(self) -> None:
-        '''Notify the event'''
-        await nio_notify_event(self)
-
     def __repr__(self):
-        return f'<Event@{hex(id(self))} is_notified={self.is_notified}>'
+        return f'<Futex@{hex(id(self))}>'
 
 
 class Task:
@@ -231,24 +224,24 @@ def nio_unset_timeout(timeout: Timeout) -> None:
 
 
 @coroutine
-def nio_wait_event(event: Event) -> None:
-    '''Wait until event notifyed
+def nio_futex_wait(futex: Futex) -> None:
+    '''Wait on futex
 
     Raises:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     '''
-    yield (nio_wait_event, event)
+    yield (nio_futex_wait, futex)
 
 
 @coroutine
-def nio_notify_event(event: Event) -> None:
-    '''Notify a event
+def nio_futex_wake(futex: Futex, n: int) -> None:
+    '''Wake up at most n tasks waiting on futex
 
     Raises:
         TaskCanceled: task canceled
     '''
-    yield (nio_notify_event, event)
+    yield (nio_futex_wake, futex)
 
 
 @coroutine
