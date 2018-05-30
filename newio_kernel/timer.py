@@ -20,6 +20,9 @@ class KernelTimer:
         self.node = None
         self.is_expired = False
 
+    def stop(self):
+        self.timer_wheel._stop_timer(self)
+
     def __repr__(self):
         return ('<KernelTimer {seconds:.3f}s tick={current_tick}/{index}'
                 ' rounds={rounds} task#{task_id}>').format(
@@ -58,7 +61,7 @@ class TimerWheel:
         LOG.debug('start timer %r', timer)
         return timer
 
-    def stop_timer(self, timer):
+    def _stop_timer(self, timer):
         if not timer.is_expired:
             self.wheel[timer.index].remove(timer.node)
 
@@ -74,8 +77,8 @@ class TimerWheel:
                 next_node = node.next
                 if timer.rounds <= 0:
                     timer.is_expired = True
-                    timer.action(timer)
                     timers.remove(node)
+                    timer.action(timer)
                 else:
                     timer.rounds -= 1
                 node = next_node
