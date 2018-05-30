@@ -5,11 +5,11 @@ from .api import wait_read, wait_write, FileDescriptor
 
 try:
     from ssl import SSLWantReadError, SSLWantWriteError
-    WantRead = (BlockingIOError, InterruptedError, SSLWantReadError)
-    WantWrite = (BlockingIOError, InterruptedError, SSLWantWriteError)
+    WantRead = (BlockingIOError, SSLWantReadError)
+    WantWrite = (BlockingIOError, SSLWantWriteError)
 except ImportError:
-    WantRead = (BlockingIOError, InterruptedError)
-    WantWrite = (BlockingIOError, InterruptedError)
+    WantRead = (BlockingIOError,)
+    WantWrite = (BlockingIOError,)
 
 
 class Socket:

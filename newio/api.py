@@ -21,12 +21,12 @@ async def wait_write(fd: FileDescriptor) -> None:
 
 async def run_in_thread(fn, *args, **kwargs):
     '''Run fn in thread pool'''
-    await syscall.nio_run_in_thread(fn, *args, **kwargs)
+    return await syscall.nio_run_in_thread(fn, *args, **kwargs)
 
 
 async def run_in_process(fn, *args, **kwargs):
     '''Run fn in process pool'''
-    await syscall.nio_run_in_process(fn, *args, **kwargs)
+    return await syscall.nio_run_in_process(fn, *args, **kwargs)
 
 
 async def sleep(seconds: float) -> None:

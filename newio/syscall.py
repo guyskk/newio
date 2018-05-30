@@ -276,7 +276,7 @@ def nio_run_in_thread(fn, *args, **kwargs):
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     '''
-    yield(nio_run_in_thread, fn, args, kwargs)
+    return (yield (nio_run_in_thread, fn, args, kwargs))
 
 
 @coroutine
@@ -287,4 +287,4 @@ def nio_run_in_process(fn, *args, **kwargs):
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     '''
-    yield(nio_run_in_process, fn, args, kwargs)
+    return (yield (nio_run_in_process, fn, args, kwargs))
