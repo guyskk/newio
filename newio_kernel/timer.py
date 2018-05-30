@@ -64,12 +64,19 @@ class TimerWheel:
             deadline=deadline, index=index, rounds=rounds)
         node = self.wheel[index].append(timer)
         timer.node = node
-        LOG.debug('start timer %r', timer)
+        LOG.debug('start timer %r for task %r', timer, task)
         return timer
 
     def _stop_timer(self, timer):
         if not timer.is_expired:
+            LOG.debug('stop timer %r of %r', timer, timer.task)
             self.wheel[timer.index].remove(timer.node)
+
+    def _wakeup(self, timer):
+        timer.is_expired = True
+        if timer.task.is_alive:
+            LOG.debug('task %r wakeup by timer %r', timer.task, timer)
+            timer.action(timer)
 
     def check(self):
         duration = time.monotonic() - self.current_tick_time
@@ -82,9 +89,8 @@ class TimerWheel:
                 timer = node.value
                 next_node = node.next
                 if timer.rounds <= 0:
-                    timer.is_expired = True
                     timers.remove(node)
-                    timer.action(timer)
+                    self._wakeup(timer)
                 else:
                     timer.rounds -= 1
                 node = next_node

@@ -56,6 +56,7 @@ class Selector:
     def _unregister(self, fd):
         if fd.selector_key is None:
             return
+        LOG.debug('selector unregister fd %r', fd)
         self._sel.unregister(fd)
 
     def _register(self, task, user_fd, events):
@@ -64,10 +65,11 @@ class Selector:
             fd = KernelFd(self, user_fd, task)
         if fd.task is not task:
             raise RuntimeError('file descriptor already waiting by other task')
-        LOG.debug('selector register fd %r, events=%r', fd, events)
         if fd.selector_key is None:
+            LOG.debug('selector register fd %r, events=%r', fd, events)
             fd.selector_key = self._sel.register(fd, events)
         elif fd.events != events:
+            LOG.debug('selector modify fd %r, events=%r', fd, events)
             fd.selector_key = self._sel.modify(fd, events)
         return fd
 
@@ -75,7 +77,8 @@ class Selector:
         io_events = self._sel.select(timeout=timeout)
         for key, mask in io_events:
             fd = key.fileobj
-            if fd.events & mask:
+            if fd.task.is_alive and fd.events & mask:
+                LOG.debug('task %r wakeup by selector fd %r', fd.task, fd)
                 yield fd.task
 
     def close(self):

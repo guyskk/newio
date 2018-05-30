@@ -17,3 +17,4 @@ pytest-cov = "^2.5"
 [tool.poetry.dev-dependencies]
 pytest = "^3.5"
 invoke = "^1.0"
+coloredlogs = "^10.0"

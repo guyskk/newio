@@ -1,4 +1,7 @@
+import logging
 from llist import dllist
+
+LOG = logging.getLogger(__name__)
 
 
 class KernelFutex:
@@ -16,12 +19,14 @@ class KernelFutex:
         return futex
 
     def add_waiter(self, task):
+        LOG.debug('task %r waiting for futex %r', task, self)
         waiter = FutexWaiter(self, task)
         waiter.node = self._waiters.append(waiter)
         return waiter
 
     def _cancel_waiter(self, waiter):
         if not waiter.is_expired:
+            LOG.debug('task %r cancel waiting futex %r', waiter.task, self)
             self._waiters.remove(waiter.node)
             waiter.is_expired = True
 
@@ -30,6 +35,7 @@ class KernelFutex:
             task = waiter.task
             waiter.is_expired = True
             if task.is_alive:
+                LOG.debug('task %r wakeup by futex %r', task, self)
                 yield task
         self._waiters.clear()
 
@@ -39,12 +45,12 @@ class KernelFutex:
             waiter.is_expired = True
             task = waiter.task
             if task.is_alive:
+                LOG.debug('task %r wakeup by futex %r', task, self)
                 yield task
                 n -= 1
 
     def __repr__(self):
-        num = len(self._waiters)
-        return f'<KernelFutex@{hex(id(self._nio_ref_))} {num} waiters>'
+        return f'<KernelFutex@{hex(id(self._nio_ref_))}>'
 
 
 class FutexWaiter:

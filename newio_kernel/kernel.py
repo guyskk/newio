@@ -1,6 +1,7 @@
 '''
 Newio Kernel
 '''
+import os
 import logging
 import time
 from collections import deque
@@ -18,9 +19,12 @@ from .futex import KernelFutex
 
 LOG = logging.getLogger(__name__)
 DEFAULT_TICK_DURATION = 0.010
+DEFAULT_MAX_NUM_PROCESS = os.cpu_count()
+DEFAULT_MAX_NUM_THREAD = DEFAULT_MAX_NUM_PROCESS * 16
 
 
 class Runner:
+    '''coroutine runner'''
 
     def __init__(self, *args, **kwargs):
         self.k_args = args
@@ -46,11 +50,6 @@ class KernelTask:
         self.result = None
         self.waiting = None
 
-    def clean_waiting(self):
-        if self.waiting:
-            self.waiting.clean()
-            self.waiting = None
-
     def __repr__(self):
         if self.is_alive:
             if self.waiting is None:
@@ -63,6 +62,11 @@ class KernelTask:
             state = 'stoped'
         return '<KernelTask#{} {} @{}>'.format(self.ident, self.name, state)
 
+    def clean_waiting(self):
+        if self.waiting:
+            self.waiting.clean()
+            self.waiting = None
+
     def throw_cancel(self):
         for _ in range(100):
             self.throw(TaskCanceled())
@@ -72,19 +76,25 @@ class KernelTask:
 
 
 class Kernel:
-    def __init__(self, tick_duration=DEFAULT_TICK_DURATION):
+    def __init__(
+        self,
+        max_num_thread=DEFAULT_MAX_NUM_THREAD,
+        max_num_process=DEFAULT_MAX_NUM_PROCESS,
+        tick_duration=DEFAULT_TICK_DURATION,
+    ):
         self.next_task_id = 0
         self.tick_duration = tick_duration
         self.tasks = dllist()
         self.ready_tasks = deque()
         self.selector = Selector()
         self.timer_wheel = TimerWheel(tick_duration=tick_duration)
-        self.executor = Executor()
+        self.executor = Executor(
+            max_num_thread=max_num_thread, max_num_process=max_num_process)
         self.current = None
         self.main_task = None
 
     def run(self, coro, timeout=None):
-        self.main_task = self.start_task(self.kernel_main(coro, timeout))
+        self.main_task = self.start_task(self.kernel_main(coro))
         if timeout is not None:
             self.timer_wheel.start_timer(
                 timeout, self._timer_action_cancel, self.main_task)
@@ -92,18 +102,14 @@ class Kernel:
             self._run()
         except BaseException:
             self.shutdown()
-            self._close(wait=False)
             raise
         else:
-            self._close()
+            self.close()
         if self.main_task.error:
             raise self.main_task.error
         return self.main_task.result
 
-    def _close(self, wait=True):
-        self.executor.shutdown(wait=wait)
-
-    async def kernel_main(self, coro, timeout):
+    async def kernel_main(self, coro):
         try:
             await coro
         finally:
@@ -117,7 +123,13 @@ class Kernel:
                     user_task = task._nio_ref_
                     await user_task.join()
 
+    def close(self, wait=True):
+        '''normal exit'''
+        self.selector.close()
+        self.executor.shutdown(wait=wait)
+
     def shutdown(self):
+        '''force exit'''
         # force cancel all tasks
         self.tasks.remove(self.main_task.node)
         while self.tasks:
@@ -125,6 +137,7 @@ class Kernel:
             self._cancel_task(task)
         self.main_task.node = self.tasks.append(self.main_task)
         self._cancel_task(self.main_task)
+        self.close(wait=False)
 
     def _cancel_task(self, task):
         # cancel a task, ignore any exception here because shutdown
@@ -150,11 +163,11 @@ class Kernel:
             self._run_ready_tasks()
             t2 = time.monotonic()
             time_poll = self.tick_duration / (1 + factor_timers + factor_tasks)
-            self._poll_io(time_poll)  # poll_io
+            self._poll_io(round(time_poll, 3))  # poll_io
             t3 = time.monotonic()
             self._run_ready_tasks()
             t4 = time.monotonic()
-            poll_io_cost = max(0.000001, t3 - t2)
+            poll_io_cost = max(0.001, t3 - t2)
             factor_timers = (t2 - t1) / poll_io_cost
             factor_tasks = (t4 - t3) / poll_io_cost
 
@@ -188,6 +201,14 @@ class Kernel:
         for task in self.selector.poll(time_poll):
             self.schedule_task(task, self._task_action_send)
 
+    def _poll_executor(self):
+        for task, result, error in self.executor.poll():
+            if error is None:
+                self.schedule_task(task, self._task_action_send, result)
+            else:
+                self.schedule_task(task, self._task_action_throw, error)
+            task.clean_waiting()
+
     def start_task(self, coro):
         # create
         task = KernelTask(coro, ident=self.next_task_id)
@@ -201,7 +222,6 @@ class Kernel:
         return task
 
     def schedule_task(self, task, action, *value):
-        LOG.debug('schedule task %r', task)
         self.ready_tasks.append((task, action, *value))
 
     def stop_task(self, task, *, result=None, error=None):
@@ -296,7 +316,6 @@ class Kernel:
     def nio_futex_wait(self, user_futex):
         futex = KernelFutex.of(user_futex)
         waiter = futex.add_waiter(self.current)
-        LOG.debug('task %r waiting for futex %r', self.current, futex)
         self.current.clean_waiting()
         self.current.waiting = waiter
 
@@ -307,15 +326,17 @@ class Kernel:
         else:
             wakeup_tasks = futex.wake(n)
         for task in wakeup_tasks:
-            task.waiting = None
+            task.clean_waiting()
             self.schedule_task(task, self._task_action_send)
         self.schedule_task(self.current, self._task_action_send)
 
     def nio_wait_read(self, user_fd):
-        self.selector.register_read(self.current, user_fd)
+        fd = self.selector.register_read(self.current, user_fd)
+        self.current.waiting = fd
 
     def nio_wait_write(self, user_fd):
-        self.selector.register_write(self.current, user_fd)
+        fd = self.selector.register_write(self.current, user_fd)
+        self.current.waiting = fd
 
     def nio_run_in_thread(self, fn, args, kwargs):
         fut = self.executor.run_in_thread(self.current, fn, args, kwargs)
@@ -326,18 +347,3 @@ class Kernel:
         fut = self.executor.run_in_process(self.current, fn, args, kwargs)
         self.current.clean_waiting()
         self.current.waiting = fut
-
-    def _poll_executor(self):
-        for task, result, error in self.executor.poll():
-            if error is None:
-                LOG.debug('notify fn task %r', task)
-            else:
-                LOG.debug('notify fn task %r with error:',
-                          task, exc_info=error)
-            if not task.is_alive:
-                return
-            if error is None:
-                self.schedule_task(task, self._task_action_send, result)
-            else:
-                self.schedule_task(task, self._task_action_throw, error)
-            task.waiting = None
