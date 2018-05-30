@@ -57,6 +57,7 @@ class Selector:
         if fd.selector_key is None:
             return
         LOG.debug('selector unregister fd %r', fd)
+        fd.selector_key = None
         self._sel.unregister(fd)
 
     def _register(self, task, user_fd, events):
