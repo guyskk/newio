@@ -78,6 +78,11 @@ class open_nursery:
         self._tasks.append(task)
         return task
 
+    async def join(self):
+        for task in self._tasks:
+            if task.is_alive:
+                await task.join()
+
     async def __aenter__(self):
         if self._is_closed:
             raise RuntimeError('nursery already closed')
@@ -88,6 +93,4 @@ class open_nursery:
         for task in self._tasks:
             if task.is_alive:
                 await task.cancel()
-        for task in self._tasks:
-            if task.is_alive:
-                await task.join()
+        await self.join()
