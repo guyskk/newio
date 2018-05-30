@@ -9,7 +9,7 @@ name = "local"
 url = "http://127.0.0.1:8501"
 
 [tool.poetry.dependencies]
-python = "*"
+python = ">=3.6"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.5"
