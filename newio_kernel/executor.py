@@ -16,6 +16,12 @@ class ExecutorFuture:
         self._cancelled = True
         self._fut.cancel()
 
+    def state(self):
+        return 'wait_executor'
+
+    def clean(self):
+        self.cancel()
+
     def _on_fn_done(self, fut):
         if self._cancelled:
             return

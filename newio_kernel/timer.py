@@ -33,6 +33,12 @@ class KernelTimer:
             task_id=self.task.ident
         )
 
+    def clean(self):
+        self.stop()
+
+    def state(self):
+        return 'wait_timer'
+
 
 class TimerWheel:
     '''A timer wheel based on Netty's implemention'''

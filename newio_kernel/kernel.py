@@ -31,54 +31,6 @@ class Runner:
         return kernel.run(*args, **kwargs)
 
 
-class WaitingIO:
-
-    def __init__(self, fd):
-        self.fd = fd
-
-    def state(self):
-        return self.fd.state()
-
-    def clean(self, kernel):
-        self.fd.unregister()
-
-
-class WaitingExecutor:
-
-    def __init__(self, future):
-        self.future = future
-
-    def state(self):
-        return 'wait_executor'
-
-    def clean(self, kernel):
-        LOG.debug('cancel fn of %r', self)
-        self.future.cancel()
-
-
-class WaitingFutex:
-
-    def __init__(self, waiter):
-        self.waiter = waiter
-
-    def state(self):
-        return 'wait_futex'
-
-    def clean(self, kernel):
-        self.waiter.cancel()
-
-
-class WaitingTimer:
-    def __init__(self, timer):
-        self.timer = timer
-
-    def state(self):
-        return 'sleep'
-
-    def clean(self, kernel):
-        self.timer.stop()
-
-
 class KernelTask:
     def __init__(self, coro, *, ident):
         self._nio_ref_ = None
@@ -93,6 +45,11 @@ class KernelTask:
         self.error = None
         self.result = None
         self.waiting = None
+
+    def clean_waiting(self):
+        if self.waiting:
+            self.waiting.clean()
+            self.waiting = None
 
     def __repr__(self):
         if self.is_alive:
@@ -256,9 +213,7 @@ class Kernel:
         task.result = result
         task.error = error
         # cleanup
-        if task.waiting:
-            task.waiting.clean(self)
-            task.waiting = None
+        task.clean_waiting()
         for wakeup_task in task.stop_futex.wake_all():
             self.schedule_task(wakeup_task, self._task_action_send)
         # unregister
@@ -267,7 +222,7 @@ class Kernel:
     def _timer_action_wakeup(self, timer):
         task = timer.task
         LOG.debug('task %r wakeup by %r', task, timer)
-        task.waiting = None
+        task.clean_waiting()
         self.schedule_task(task, self._task_action_send)
 
     def _timer_action_timeout(self, timer):
@@ -299,9 +254,8 @@ class Kernel:
     def nio_sleep(self, seconds):
         timer = self.timer_wheel.start_timer(
             seconds, self._timer_action_wakeup, self.current)
-        if self.current.waiting:
-            self.current.waiting.clean(self)
-        self.current.waiting = WaitingTimer(timer)
+        self.current.clean_waiting()
+        self.current.waiting = timer
 
     def nio_set_timeout(self, seconds):
         timer = self.timer_wheel.start_timer(
@@ -343,9 +297,8 @@ class Kernel:
         futex = KernelFutex.of(user_futex)
         waiter = futex.add_waiter(self.current)
         LOG.debug('task %r waiting for futex %r', self.current, futex)
-        if self.current.waiting:
-            self.current.waiting.clean(self)
-        self.current.waiting = WaitingFutex(waiter)
+        self.current.clean_waiting()
+        self.current.waiting = waiter
 
     def nio_futex_wake(self, user_futex, n):
         futex = KernelFutex.of(user_futex)
@@ -366,15 +319,13 @@ class Kernel:
 
     def nio_run_in_thread(self, fn, args, kwargs):
         fut = self.executor.run_in_thread(self.current, fn, args, kwargs)
-        if self.current.waiting:
-            self.current.waiting.clean(self)
-        self.current.waiting = WaitingExecutor(fut)
+        self.current.clean_waiting()
+        self.current.waiting = fut
 
     def nio_run_in_process(self, fn, args, kwargs):
         fut = self.executor.run_in_process(self.current, fn, args, kwargs)
-        if self.current.waiting:
-            self.current.waiting.clean(self)
-        self.current.waiting = WaitingExecutor(fut)
+        self.current.clean_waiting()
+        self.current.waiting = fut
 
     def _poll_executor(self):
         for task, result, error in self.executor.poll():

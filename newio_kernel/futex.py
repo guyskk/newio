@@ -6,7 +6,7 @@ class KernelFutex:
     def __init__(self, user_futex):
         self._nio_ref_ = user_futex
         user_futex._nio_ref_ = self
-        self._tasks = dllist()
+        self._waiters = dllist()
 
     @staticmethod
     def of(user_futex):
@@ -16,39 +16,49 @@ class KernelFutex:
         return futex
 
     def add_waiter(self, task):
-        node = self._tasks.append(task)
-        return FutexWaiter(self, task, node)
+        waiter = FutexWaiter(self, task)
+        waiter.node = self._waiters.append(waiter)
+        return waiter
 
     def _cancel_waiter(self, waiter):
-        return  # TODO
-        if not waiter.cancelled:
-            self._tasks.remove(waiter.node)
-            waiter.cancelled = True
+        if not waiter.is_expired:
+            self._waiters.remove(waiter.node)
+            waiter.is_expired = True
 
     def wake_all(self):
-        for task in self._tasks:
+        for waiter in self._waiters:
+            task = waiter.task
+            waiter.is_expired = True
             if task.is_alive:
                 yield task
-        self._tasks.clear()
+        self._waiters.clear()
 
     def wake(self, n):
-        while self._tasks and n > 0:
-            task = self.popleft()
+        while self._waiters and n > 0:
+            waiter = self.popleft()
+            waiter.is_expired = True
+            task = waiter.task
             if task.is_alive:
                 yield task
                 n -= 1
 
     def __repr__(self):
-        num = len(self._tasks)
+        num = len(self._waiters)
         return f'<KernelFutex@{hex(id(self._nio_ref_))} {num} waiters>'
 
 
 class FutexWaiter:
-    def __init__(self, futex, task, node):
+    def __init__(self, futex, task):
         self.futex = futex
         self.task = task
-        self.node = node
-        self.cancelled = False
+        self.node = None
+        self.is_expired = False
 
     def cancel(self):
         self.futex._cancel_waiter(self)
+
+    def state(self):
+        return 'wait_futex'
+
+    def clean(self):
+        self.cancel()

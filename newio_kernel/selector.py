@@ -38,6 +38,9 @@ class KernelFd:
         return '<KernelFd#{} of task #{}>'.format(
             self.fileno(), self.task.ident)
 
+    def clean(self):
+        self.unregister()
+
 
 class Selector:
 
