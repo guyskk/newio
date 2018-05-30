@@ -3,8 +3,6 @@ Newio Kernel
 '''
 import logging
 import time
-import selectors
-from selectors import DefaultSelector
 from collections import deque
 from llist import dllist
 
@@ -15,6 +13,7 @@ from newio.syscall import Futex as UserFutex
 
 from .timer import TimerWheel
 from .executor import Executor
+from .selector import Selector
 
 LOG = logging.getLogger(__name__)
 DEFAULT_TICK_DURATION = 0.010
@@ -59,16 +58,10 @@ class WaitingIO:
         self.fd = fd
 
     def state(self):
-        if self.fd.events == selectors.EVENT_READ:
-            return 'wait_read'
-        elif self.fd.events == selectors.EVENT_WRITE:
-            return 'wait_write'
-        else:
-            return 'wait_io'
+        return self.fd.state()
 
     def clean(self, kernel):
-        if self.fd is not None and self.fd.selector_key is not None:
-            kernel.selector.unregister(self.fd)
+        self.fd.unregister()
 
 
 class WaitingExecutor:
@@ -162,7 +155,7 @@ class Kernel:
         self.tick_duration = tick_duration
         self.tasks = dllist()
         self.ready_tasks = deque()
-        self.selector = DefaultSelector()
+        self.selector = Selector()
         self.timer_wheel = TimerWheel(tick_duration=tick_duration)
         self.executor = Executor()
         self.current = None
@@ -270,10 +263,8 @@ class Kernel:
             handler(*args)
 
     def _poll_io(self, time_poll):
-        io_events = self.selector.select(timeout=time_poll)
-        for key, mask in io_events:
-            fd = key.fileobj
-            self.schedule_task(fd.task, self._task_action_send)
+        for task in self.selector.poll(time_poll):
+            self.schedule_task(task, self._task_action_send)
 
     def start_task(self, coro):
         # create
@@ -412,38 +403,22 @@ class Kernel:
                     n -= 1
         self.schedule_task(self.current, self._task_action_send)
 
-    # def _selector_unregister(self, task):
-    #     fd = task.waiting_fd
-    #     LOG.debug('selector unregister fd %r', fd)
-    #     if fd is not None and fd.selector_key is not None:
-    #         self.selector.unregister(fd)
-    #     task.waiting_fd = None
-
-    def _selector_register(self, task, user_fd, events):
-        fd = user_fd._nio_ref_
-        if fd is None:
-            fd = KernelFd(user_fd, task)
-        if fd.task is not task:
-            raise RuntimeError('file descriptor already waiting by other task')
-        LOG.debug('selector register fd %r, events=%r', fd, events)
-        if fd.selector_key is None:
-            fd.selector_key = self.selector.register(fd, events)
-        elif fd.events != events:
-            fd.selector_key = self.selector.modify(fd, events)
-        task.waiting = WaitingIO(fd)
-
     def nio_wait_read(self, user_fd):
-        self._selector_register(self.current, user_fd, selectors.EVENT_READ)
+        self.selector.register_read(self.current, user_fd)
 
     def nio_wait_write(self, user_fd):
-        self._selector_register(self.current, user_fd, selectors.EVENT_WRITE)
+        self.selector.register_write(self.current, user_fd)
 
     def nio_run_in_thread(self, fn, args, kwargs):
         fut = self.executor.run_in_thread(self.current, fn, args, kwargs)
+        if self.current.waiting:
+            self.current.waiting.clean(self)
         self.current.waiting = WaitingExecutor(fut)
 
     def nio_run_in_process(self, fn, args, kwargs):
         fut = self.executor.run_in_process(self.current, fn, args, kwargs)
+        if self.current.waiting:
+            self.current.waiting.clean(self)
         self.current.waiting = WaitingExecutor(fut)
 
     def _check_executor_messages(self):
