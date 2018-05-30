@@ -1,13 +1,12 @@
+'''
+Newio Kernel
+'''
 import logging
 import time
 import selectors
 from selectors import DefaultSelector
 from collections import deque
 from llist import dllist
-from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from concurrent.futures import CancelledError as FutureCancelledError
-from queue import Queue as ThreadQueue
-from queue import Empty as QUEUE_EMPTY
 
 from newio.syscall import TaskCanceled, TaskTimeout
 from newio.syscall import Task as UserTask
@@ -15,6 +14,7 @@ from newio.syscall import Timeout as UserTimeout
 from newio.syscall import Futex as UserFutex
 
 from .timer import TimerWheel
+from .executor import Executor
 
 LOG = logging.getLogger(__name__)
 DEFAULT_TICK_DURATION = 0.010
@@ -81,8 +81,6 @@ class WaitingExecutor:
 
     def clean(self, kernel):
         LOG.debug('cancel fn of %r', self)
-        if self.future.done():
-            return
         self.future.cancel()
 
 
@@ -166,9 +164,7 @@ class Kernel:
         self.ready_tasks = deque()
         self.selector = DefaultSelector()
         self.timer_wheel = TimerWheel(tick_duration=tick_duration)
-        self.thread_executor = ThreadPoolExecutor()
-        self.process_executor = ProcessPoolExecutor()
-        self.executor_messages = ThreadQueue()
+        self.executor = Executor()
         self.current = None
         self.main_task = None
 
@@ -179,7 +175,7 @@ class Kernel:
                 timeout, self._timer_action_cancel, self.main_task)
         try:
             self._run()
-        except:
+        except BaseException:
             self.shutdown()
             self._close(wait=False)
             raise
@@ -190,8 +186,7 @@ class Kernel:
         return self.main_task.result
 
     def _close(self, wait=True):
-        self.thread_executor.shutdown(wait=wait)
-        self.process_executor.shutdown(wait=wait)
+        self.executor.shutdown(wait=wait)
 
     async def kernel_main(self, coro, timeout):
         try:
@@ -444,45 +439,24 @@ class Kernel:
         self._selector_register(self.current, user_fd, selectors.EVENT_WRITE)
 
     def nio_run_in_thread(self, fn, args, kwargs):
-        self._run_in_executor(self.thread_executor, fn, args, kwargs)
-
-    def nio_run_in_process(self, fn, args, kwargs):
-        self._run_in_executor(self.process_executor, fn, args, kwargs)
-
-    def _run_in_executor(self, executor, fn, args, kwargs):
-        fut = executor.submit(fn, *args, **kwargs)
-        fut.add_done_callback(self._on_fn_done(self.current))
+        fut = self.executor.run_in_thread(self.current, fn, args, kwargs)
         self.current.waiting = WaitingExecutor(fut)
 
-    def _on_fn_done(self, task):
-        def callback(fut):
-            LOG.debug('fn is done, future=%r, task=%r', fut, task)
-            try:
-                msg = (task, fut.result(), fut.exception())
-            except FutureCancelledError:
-                pass  # task already stoped, ignore the exception
-            else:
-                self.executor_messages.put(msg)
-        return callback
+    def nio_run_in_process(self, fn, args, kwargs):
+        fut = self.executor.run_in_process(self.current, fn, args, kwargs)
+        self.current.waiting = WaitingExecutor(fut)
 
     def _check_executor_messages(self):
-        while True:
-            try:
-                task, result, error = self.executor_messages.get_nowait()
-            except QUEUE_EMPTY:
-                break
+        for task, result, error in self.executor.poll():
+            if error is None:
+                LOG.debug('notify fn task %r', task)
             else:
-                self._notify_fn_task(task, result, error)
-
-    def _notify_fn_task(self, task, result, error):
-        if error is None:
-            LOG.debug('notify fn task %r', task)
-        else:
-            LOG.debug('notify fn task %r with error:', task, exc_info=error)
-        if not task.is_alive:
-            return
-        if error is None:
-            self.schedule_task(task, self._task_action_send, result)
-        else:
-            self.schedule_task(task, self._task_action_throw, error)
-        task.waiting = None
+                LOG.debug('notify fn task %r with error:',
+                          task, exc_info=error)
+            if not task.is_alive:
+                return
+            if error is None:
+                self.schedule_task(task, self._task_action_send, result)
+            else:
+                self.schedule_task(task, self._task_action_throw, error)
+            task.waiting = None
