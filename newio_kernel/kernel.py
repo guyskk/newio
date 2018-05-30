@@ -111,7 +111,7 @@ class Kernel:
 
     async def kernel_main(self, coro):
         try:
-            await coro
+            return await coro
         finally:
             # when main task exiting, normally cancel all subtasks
             for task in self.tasks:
