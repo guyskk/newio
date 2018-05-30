@@ -41,7 +41,7 @@ class KernelFutex:
 
     def wake(self, n):
         while self._waiters and n > 0:
-            waiter = self.popleft()
+            waiter = self._waiters.popleft()
             waiter.is_expired = True
             task = waiter.task
             if task.is_alive:
