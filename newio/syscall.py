@@ -11,7 +11,7 @@ from types import coroutine
 
 class TaskCanceled(BaseException):
     '''
-    Exception raised when task cancelled.
+    Exception raised when task canceled.
 
     It's used to unwind coroutine stack and cleanup resources,
     the exception **MUST NOT** be catch without reraise.
@@ -24,75 +24,76 @@ class TaskCanceled(BaseException):
 class TaskTimeout(Exception):
     '''Exception raised when task timeout.'''
 
-
-class FileDescriptor:
-    '''A wrapper for file descriptor'''
-
-    def __init__(self, fileno: int):
-        self._fileno = fileno
-        self._nio_ref_ = None
-
-    def fileno(self) -> int:
-        '''Get the underlying file descriptor'''
-        return self._fileno
-
-    def __repr__(self):
-        return f'<FileDescriptor#{self.fileno()}>'
+    def __init__(self, timer):
+        self.timer = timer
 
 
-class Timeout:
-    '''A wrapper for kernel timeout object'''
+class Timer:
+    '''A wrapper for kernel timer object'''
 
-    def __init__(self, kernel_timeout):
-        self._nio_ref_ = kernel_timeout
-        kernel_timeout._nio_ref_ = self
+    def __init__(self, kernel_timer):
+        self._nio_ref_ = kernel_timer
+        kernel_timer._nio_ref_ = self
 
     @property
     def seconds(self) -> float:
-        '''timeout seconds'''
+        '''timer expire duration in seconds'''
         return self._nio_ref_.seconds
 
     @property
     def deadline(self) -> float:
-        '''timeout deadline, based on time.monotonic()'''
+        '''timer deadline, based on time.monotonic()'''
         return self._nio_ref_.deadline
 
     @property
     def is_expired(self) -> bool:
-        '''is timeout expired'''
+        '''is timer expired'''
         return self._nio_ref_.is_expired
+
+    @property
+    def is_canceled(self) -> bool:
+        '''is timer canceled'''
+        return self._nio_ref_.is_canceled
+
+    async def cancel(self):
+        await nio_unset_timer(self)
 
     def __repr__(self):
         if self.is_expired:
             status = 'expired'
+        elif self.is_canceled:
+            status = 'canceled'
         else:
             remain = max(0, self.deadline - time.monotonic())
             status = f'remain={remain:.3f}s'
-        return f'<Timeout {self.seconds:.3f}s {status}>'
+        return f'<Timer {self.seconds:.3f}s {status}>'
 
 
-class Futex:
+class Lounge:
     '''
-    Futex - fast userspace mutex, borrowing from Linux kernel.
+    Lounge - waiting room for tasks, borrowing from Linux kernel(Futex).
     It is a sychronization primitive used to coordinate tasks.
     '''
 
-    # A symbol for wake all tasks
-    WAKE_ALL = -1
+    WAKE_ALL = -1  # A symbol for wake all tasks
 
     def __init__(self):
         self._nio_ref_ = None
 
     def __repr__(self):
-        return f'<Futex@{hex(id(self))}>'
+        return f'<Lounge@{hex(self.ident)[2:]}>'
+
+    @property
+    def ident(self) -> int:
+        return id(self)
 
     async def wait(self):
-        '''Wait on the futex'''
-        await nio_futex_wait(self)
+        '''Wait on the lounge'''
+        await nio_lounge_wait(self)
 
     async def wake(self, n: int):
-        '''Wake up at most n tasks waiting on the futex'''
-        await nio_futex_wake(self, n)
+        '''Wake up at most n tasks waiting on the lounge'''
+        await nio_lounge_wake(self, n)
 
 
 class Task:
@@ -150,7 +151,7 @@ class Task:
 
 
 @coroutine
-def nio_wait_read(fd: FileDescriptor) -> None:
+def nio_wait_read(fd: int) -> None:
     '''Wait until fd readable
 
     Raises:
@@ -161,7 +162,7 @@ def nio_wait_read(fd: FileDescriptor) -> None:
 
 
 @coroutine
-def nio_wait_write(fd: FileDescriptor) -> None:
+def nio_wait_write(fd: int) -> None:
     '''Wait until fd writeable
 
     Raises:
@@ -172,26 +173,15 @@ def nio_wait_write(fd: FileDescriptor) -> None:
 
 
 @coroutine
-def nio_sleep(seconds: float=0) -> None:
-    '''Sleep at least <sesonds> seconds
-
-    Raises:
-        TaskTimeout: task timeout
-        TaskCanceled: task canceled
-    '''
-    if seconds < 0:
-        raise ValueError('can not sleep a negative seconds')
-    yield (nio_sleep, seconds)
-
-
-@coroutine
-def nio_spawn(coro) -> Task:
+def nio_spawn(coro, cancel_after: float=None) -> Task:
     '''Spawn a task
 
+    If cancel_after is not None, cancel the task after <cancel_after> seconds
+
     Raises:
         TaskCanceled: task canceled
     '''
-    return (yield (nio_spawn, coro))
+    return (yield (nio_spawn, coro, cancel_after))
 
 
 @coroutine
@@ -226,46 +216,59 @@ def nio_join(task: Task) -> None:
 
 
 @coroutine
-def nio_set_timeout(seconds) -> Timeout:
-    '''Set a timeout for current task
-
-    Raises:
-        TaskCanceled: task canceled
-    '''
-    if seconds < 0:
-        raise ValueError('can not set negative timeout')
-    return (yield (nio_set_timeout, seconds))
-
-
-@coroutine
-def nio_unset_timeout(timeout: Timeout) -> None:
-    '''Unset a timeout for current task
-
-    Raises:
-        TaskCanceled: task canceled
-    '''
-    yield (nio_unset_timeout, timeout)
-
-
-@coroutine
-def nio_futex_wait(futex: Futex) -> None:
-    '''Wait on futex
+def nio_sleep(seconds: float=0) -> None:
+    '''Sleep at least <sesonds> seconds
 
     Raises:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     '''
-    yield (nio_futex_wait, futex)
+    if seconds < 0:
+        raise ValueError('can not sleep a negative seconds')
+    yield (nio_sleep, seconds)
 
 
 @coroutine
-def nio_futex_wake(futex: Futex, n: int) -> None:
-    '''Wake up at most n tasks waiting on futex
+def nio_timeout_after(seconds: float) -> Timer:
+    '''Set a timer for timeout current task after <seconds> seconds
 
     Raises:
         TaskCanceled: task canceled
     '''
-    yield (nio_futex_wake, futex, n)
+    if seconds < 0:
+        raise ValueError('can not set negative seconds timer')
+    return (yield (nio_timeout_after, seconds))
+
+
+@coroutine
+def nio_unset_timer(timer: Timer) -> None:
+    '''Unset a timer for current task
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
+    yield (nio_unset_timer, timer)
+
+
+@coroutine
+def nio_lounge_wait(lounge: Lounge) -> None:
+    '''Wait on lounge
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
+    yield (nio_lounge_wait, lounge)
+
+
+@coroutine
+def nio_lounge_wake(lounge: Lounge, n: int) -> None:
+    '''Wake up at most n tasks waiting on lounge
+
+    Raises:
+        TaskCanceled: task canceled
+    '''
+    yield (nio_lounge_wake, lounge, n)
 
 
 @coroutine

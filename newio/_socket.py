@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from socket import SOL_SOCKET, SO_ERROR
 
-from .api import wait_read, wait_write, FileDescriptor
+from .api import wait_read, wait_write
 
 try:
     from ssl import SSLWantReadError, SSLWantWriteError
@@ -21,7 +21,7 @@ class Socket:
     def __init__(self, sock):
         self._socket = sock
         self._socket.setblocking(False)
-        self._fd = FileDescriptor(sock.fileno())
+        self._fd = sock.fileno()
         # Commonly used bound methods
         self._socket_send = sock.send
         self._socket_recv = sock.recv
@@ -33,7 +33,7 @@ class Socket:
         return getattr(self._socket, name)
 
     def fileno(self):
-        return self._fd.fileno()
+        return self._fd
 
     def settimeout(self, seconds):
         raise RuntimeError('Use newio.timeout() to set a timeout')
