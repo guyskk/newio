@@ -1,97 +1,147 @@
 import time
+import heapq
 import logging
-from llist import dllist
+from math import log2
 
 LOG = logging.getLogger(__name__)
 
 
 class KernelTimer:
-    def __init__(
-            self, *, timer_wheel, seconds, action,
-            task, deadline, index, rounds):
-        self._nio_ref_ = None
-        self.timer_wheel = timer_wheel
+    def __init__(self, timerqueue, seconds, deadline, callback, cb_args, cb_kwargs):
+        self.timerqueue = timerqueue
         self.seconds = seconds
-        self.action = action
-        self.task = task
         self.deadline = deadline
-        self.index = index
-        self.rounds = rounds
-        self.node = None
+        self.callback = callback
+        self.cb_args = cb_args
+        self.cb_kwargs = cb_kwargs
+        self.bucket = 0
         self.is_expired = False
+        self.is_canceled = False
+        self._nio_ref_ = None
 
-    def stop(self):
-        self.timer_wheel._stop_timer(self)
+    def __lt__(self, other):
+        return self.deadline < other.deadline
 
     def __repr__(self):
-        return ('<KernelTimer {seconds:.3f}s tick={current_tick}/{index}'
-                ' rounds={rounds} task#{task_id}>').format(
-            seconds=self.seconds,
-            current_tick=self.timer_wheel.current_tick,
-            rounds=self.rounds,
-            index=self.index,
-            task_id=self.task.ident
-        )
+        if self.is_expired:
+            state = 'expired'
+        elif self.is_canceled:
+            state = 'canceled'
+        else:
+            remain = max(0, self.deadline - self.timerqueue.clock())
+            state = f'remain={remain:.3f}s'
+        bucket = '-' if self.bucket < 0 else str(self.bucket)
+        return f'<KernelTimer {self.seconds:.3f}s {state} [{bucket}]>'
+
+    def cancel(self):
+        self.timerqueue._cancel_timer(self)
 
     def clean(self):
-        self.stop()
+        self.cancel()
 
     def state(self):
         return 'wait_timer'
 
 
-class TimerWheel:
-    '''A timer wheel based on Netty's implemention'''
+def _compute_buckets(ticks):
+    buckets = 0
+    while ticks > 0:
+        ticks = ticks // 2
+        buckets += 1
+    return buckets
 
-    def __init__(self, tick_duration=0.010, ticks_per_wheel=1000):
-        self.ticks_per_wheel = ticks_per_wheel
-        self.tick_duration = tick_duration
-        self.wheel = [dllist() for _ in range(ticks_per_wheel)]
-        self.current_tick = 0
-        self.current_tick_time = time.monotonic()
 
-    def __repr__(self):
-        return '<TimerWheel tick#{tick} @{time:.3f}>'.format(
-            tick=self.current_tick, time=self.current_tick_time)
+class TimerQueue:
+    '''
+    Timers Location:
 
-    def start_timer(self, seconds, action, task):
-        deadline = time.monotonic() + seconds
-        ticks = int((deadline - self.current_tick_time) / self.tick_duration)
-        rounds, ticks = divmod(ticks, self.ticks_per_wheel)
-        index = (self.current_tick + ticks) % self.ticks_per_wheel
-        timer = KernelTimer(
-            timer_wheel=self, seconds=seconds, action=action, task=task,
-            deadline=deadline, index=index, rounds=rounds)
-        node = self.wheel[index].append(timer)
-        timer.node = node
-        LOG.debug('start timer %r for task %r', timer, task)
+               <---+-------------------------------->
+                   |
+               near|              far
+                   |
+               +---+---+-------+---------------+----+
+        bucket | - | 0 |   1   |       2       |
+               v   v   v       v               v
+
+         tick  +------------------------------------>
+               0   1   2   3   4   5   6   7   8   9
+
+                        +> tick< 1: -1
+               bucket = |
+                        +> tick>=1: log2(tick)
+
+        Drawing by: http://asciiflow.com/
+    '''
+
+    def __init__(self, timeslice=1.0, timespan=300.0, clock=time.monotonic):
+        self.timeslice = timeslice
+        self.buckets = _compute_buckets(timespan / timeslice)
+        self.max_tick = 2 ** self.buckets
+        self.clock = clock
+        self.tick_time = clock()
+        self.tick = 0
+        self.near_timers = []
+        self.far_timers = [set() for _ in range(self.buckets)]
+
+    def start_timer(self, seconds, callback, cb_args=(), cb_kwargs=None):
+        deadline = self.clock() + max(0, seconds)
+        if cb_kwargs is None:
+            cb_kwargs = {}
+        timer = KernelTimer(self, seconds, deadline, callback, cb_args, cb_kwargs)
+        self._push_timer(timer)
         return timer
 
-    def _stop_timer(self, timer):
-        if not timer.is_expired:
-            LOG.debug('stop timer %r of %r', timer, timer.task)
-            self.wheel[timer.index].remove(timer.node)
+    def _push_timer(self, timer):
+        ticks = (timer.deadline - self.tick_time) // self.timeslice
+        if ticks < 1:
+            bucket = -1
+        else:
+            bucket = min(self.buckets - 1, int(log2(ticks)))
+        timer.bucket = bucket
+        LOG.debug('push timer %r', timer)
+        if bucket < 0:
+            heapq.heappush(self.near_timers, timer)
+        else:
+            self.far_timers[bucket].add(timer)
 
-    def _wakeup(self, timer):
-        timer.is_expired = True
-        if timer.task.is_alive:
-            LOG.debug('task %r wakeup by timer %r', timer.task, timer)
-            timer.action(timer)
+    def _cancel_timer(self, timer):
+        if not timer.is_expired and not timer.is_canceled:
+            LOG.debug('cancel timer %r', timer)
+            timer.is_canceled = True
+            if timer.bucket >= 0:
+                self.far_timers[timer.bucket].remove(timer)
+
+    def next_check_interval(self):
+        if self.near_timers:
+            return self.near_timers[0].deadline - self.clock()
+        else:
+            return self.tick_time + self.timeslice - self.clock()
+
+    def _forward_far_buckets(self):
+        return [n for n in range(self.buckets) if self.tick % (2**n) == 0]
+
+    def _forward(self):
+        ticks = int((self.clock() - self.tick_time) // self.timeslice)
+        if ticks > 0:
+            self.tick_time += self.timeslice * ticks
+            for _ in range(ticks):
+                self.tick = (self.tick + 1) % self.max_tick
+                for bucket in self._forward_far_buckets():
+                    timers = self.far_timers[bucket]
+                    if timers:
+                        self.far_timers[bucket] = set()
+                        for t in timers:
+                            self._push_timer(t)
 
     def check(self):
-        duration = time.monotonic() - self.current_tick_time
-        ticks = int(duration / self.tick_duration)
-        self.current_tick_time += ticks * self.tick_duration
-        for _ in range(ticks):
-            timers = self.wheel[self.current_tick]
-            node = timers.first
-            while node:
-                timer = node.value
-                next_node = node.next
-                if timer.rounds <= 0:
-                    timers.remove(node)
-                    self._wakeup(timer)
-                else:
-                    timer.rounds -= 1
-                node = next_node
-            self.current_tick = (self.current_tick + 1) % self.ticks_per_wheel
+        self._forward()
+        deadline = self.clock()
+        while self.near_timers:
+            timer = self.near_timers[0]
+            if timer.deadline > deadline and not timer.is_canceled:
+                break
+            timer = heapq.heappop(self.near_timers)
+            if not timer.is_expired and not timer.is_canceled:
+                LOG.debug('timer %r expired', timer)
+                timer.is_expired = True
+                timer.callback(timer, *timer.cb_args, **timer.cb_kwargs)

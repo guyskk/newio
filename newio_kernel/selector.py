@@ -7,12 +7,14 @@ LOG = logging.getLogger(__name__)
 
 class KernelFd:
 
-    def __init__(self, selector, user_fd, task):
+    def __init__(self, selector, fileno, task):
         self._selector = selector
-        self._nio_ref_ = user_fd
-        user_fd._nio_ref_ = self
+        self._fileno = fileno
         self.task = task
         self.selector_key = None
+
+    def fileno(self):
+        return self._fileno
 
     def state(self):
         if self.events == EVENT_READ:
@@ -28,15 +30,12 @@ class KernelFd:
             return 0
         return self.selector_key.events
 
-    def fileno(self):
-        return self._nio_ref_.fileno()
-
     def unregister(self):
         self._selector._unregister(self)
 
     def __repr__(self):
-        return '<KernelFd#{} of task #{}>'.format(
-            self.fileno(), self.task.ident)
+        return (f'<KernelFd#{self.fileno()} of '
+                f'task #{self.task.ident} {self.task.name}>')
 
     def clean(self):
         self.unregister()
@@ -46,31 +45,32 @@ class Selector:
 
     def __init__(self):
         self._sel = DefaultSelector()
+        self._fds = {}
 
-    def register_read(self, task, user_fd):
-        return self._register(task, user_fd, EVENT_READ)
+    def register_read(self, task, fileno):
+        return self._register(task, fileno, EVENT_READ)
 
-    def register_write(self, task, user_fd):
-        return self._register(task, user_fd, EVENT_WRITE)
+    def register_write(self, task, fileno):
+        return self._register(task, fileno, EVENT_WRITE)
 
-    def _unregister(self, fd):
-        if fd.selector_key is None:
-            return
-        LOG.debug('selector unregister fd %r', fd)
-        fd.selector_key = None
-        self._sel.unregister(fd)
+    def _unregister(self, fileno):
+        if fileno in self._fds:
+            LOG.debug('unregister fd %r', fileno)
+            del self._fds[fileno]
+            self._sel.unregister(fileno)
 
-    def _register(self, task, user_fd, events):
-        fd = user_fd._nio_ref_
+    def _register(self, task, fileno, events):
+        fd = self._fds.get(fileno, None)
         if fd is None:
-            fd = KernelFd(self, user_fd, task)
+            fd = KernelFd(self, fileno, task)
+            self._fds[fileno] = fd
         if fd.task is not task:
-            raise RuntimeError('file descriptor already waiting by other task')
+            raise RuntimeError('file descriptor already registered by other task')
         if fd.selector_key is None:
-            LOG.debug('selector register fd %r, events=%r', fd, events)
+            LOG.debug('register fd %r, events=%r', fd, events)
             fd.selector_key = self._sel.register(fd, events)
         elif fd.events != events:
-            LOG.debug('selector modify fd %r, events=%r', fd, events)
+            LOG.debug('modify fd %r, events=%r', fd, events)
             fd.selector_key = self._sel.modify(fd, events)
         return fd
 
@@ -79,7 +79,7 @@ class Selector:
         for key, mask in io_events:
             fd = key.fileobj
             if fd.task.is_alive and fd.events & mask:
-                LOG.debug('task %r wakeup by selector fd %r', fd.task, fd)
+                LOG.debug('task %r wakeup by fd %r', fd.task, fd)
                 yield fd.task
 
     def close(self):

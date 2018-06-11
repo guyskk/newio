@@ -9,14 +9,14 @@ async def test_io():
     client, server = socket.socketpair()
 
     async def server_task():
-        fd = nio.FileDescriptor(server.fileno())
+        fd = server.fileno()
         await nio.wait_read(fd)
         char = server.recv(1)
         await nio.wait_write(fd)
         server.send(char)
 
     async def client_task(char):
-        fd = nio.FileDescriptor(client.fileno())
+        fd = client.fileno()
         await nio.wait_write(fd)
         client.send(char)
         await nio.wait_read(fd)
