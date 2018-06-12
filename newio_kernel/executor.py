@@ -56,7 +56,6 @@ class Executor:
         self._thread_executor = ThreadPoolExecutor(max_num_thread)
         self._process_executor = ProcessPoolExecutor(max_num_process)
         self._channel = Channel()
-        self._task = None
 
     def run_in_thread(self, task, fn, args, kwargs):
         LOG.debug('task %r run %r in executor thread', task, fn)
@@ -69,10 +68,7 @@ class Executor:
         return ExecutorFuture(self, task, fut)
 
     async def start(self):
-        self._task = await newio.spawn(self._channel.consumer())
-
-    async def stop(self):
-        await self._task.cancel()
+        await newio.spawn(self._channel.consumer())
 
     def shutdown(self, wait=True):
         self._thread_executor.shutdown(wait=wait)

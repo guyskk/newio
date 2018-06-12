@@ -4,21 +4,20 @@ Newio Kernel
 import os
 import time
 import logging
-from collections import deque
 from pyllist import dllist
 
-from newio.syscall import TaskCanceled, TaskTimeout
 from newio.syscall import Task as UserTask
 from newio.syscall import Timer as UserTimer
 from newio.syscall import Lounge as UserLounge
+from newio.syscall import TaskCanceled
 
 from .timer import TimerQueue
 from .executor import Executor
 from .selector import Selector
 from .lounge import KernelLounge
+from .engine import Engine, Command
 
 LOG = logging.getLogger(__name__)
-# DEFAULT_TICK_DURATION = 0.010
 DEFAULT_MAX_NUM_PROCESS = os.cpu_count()
 DEFAULT_MAX_NUM_THREAD = DEFAULT_MAX_NUM_PROCESS * 16
 
@@ -36,8 +35,9 @@ class Runner:
 
 
 class KernelTask:
-    def __init__(self, coro, *, ident):
+    def __init__(self, kernel, coro, *, ident):
         self._nio_ref_ = None
+        self._kernel = kernel
         self.coro = coro
         self.send = coro.send
         self.throw = coro.throw
@@ -67,12 +67,8 @@ class KernelTask:
             self.waiting.clean()
             self.waiting = None
 
-    def throw_cancel(self):
-        for _ in range(100):
-            self.throw(TaskCanceled())
-        message = f'failed to cancel task {self!r}, it may leak resources'
-        LOG.error(message)
-        raise RuntimeError(message)
+    def stop(self, *args, **kwargs):
+        self._kernel.stop_task(self, *args, **kwargs)
 
 
 class Kernel:
@@ -80,21 +76,18 @@ class Kernel:
         self,
         max_num_thread=DEFAULT_MAX_NUM_THREAD,
         max_num_process=DEFAULT_MAX_NUM_PROCESS,
-        # tick_duration=DEFAULT_TICK_DURATION,
     ):
         self.next_task_id = 0
-        # self.tick_duration = tick_duration
         self.tasks = dllist()
-        self.ready_tasks = deque()
         self.selector = Selector()
         self.clock = time.monotonic
         self.timer_queue = TimerQueue(clock=self.clock)
+        self.engine = Engine(self.syscall_handler)
         self.executor = Executor(
             on_error=self._on_executor_error,
             on_result=self._on_executor_result,
             max_num_thread=max_num_thread,
             max_num_process=max_num_process)
-        self.current = None
         self.main_task = None
 
     def run(self, coro, timeout=None):
@@ -118,16 +111,17 @@ class Kernel:
             await self.executor.start()
             return await coro
         finally:
-            await self.executor.stop()
             # when main task exiting, normally cancel all subtasks
-            for task in self.tasks:
-                if task is not self.main_task:
-                    user_task = task._nio_ref_
+            # the first task is kernel main task, don't cancel it
+            node = self.tasks.last
+            while node != self.main_task.node:
+                user_task = node.value._nio_ref_
+                if user_task.is_alive:
                     await user_task.cancel()
-            for task in self.tasks:
-                if task is not self.main_task:
-                    user_task = task._nio_ref_
-                    await user_task.join()
+                node = node.prev
+            while len(self.tasks) > 1:
+                user_task = self.tasks.last.value._nio_ref_
+                await user_task.join()
 
     def close(self, wait=True):
         '''normal exit'''
@@ -137,120 +131,42 @@ class Kernel:
     def shutdown(self):
         '''force exit'''
         # force cancel all tasks
-        self.tasks.remove(self.main_task.node)
         while self.tasks:
-            task = self.tasks.first.value
-            self._cancel_task(task)
-        self.main_task.node = self.tasks.append(self.main_task)
-        self._cancel_task(self.main_task)
+            task = self.tasks.last.value
+            if task.is_alive:
+                self.engine.force_cancel(task)
         self.close(wait=False)
 
-    def _cancel_task(self, task):
-        # cancel a task, ignore any exception here because shutdown
-        # caused by some exception, we need force cancel task
-        try:
-            task.throw_cancel()
-        except StopIteration as stoped:
-            self.stop_task(task, result=stoped.value)
-        except TaskCanceled as ex:
-            self.stop_task(task, error=ex)
-        except BaseException as ex:
-            LOG.warn('task %r crashed on cancel:', task, exc_info=True)
-            self.stop_task(task, error=ex)
-
     def _run(self):
-        # factor_timers = 0  # timers_cost / poll_io_cost
-        # factor_tasks = 0  # tasks_cost / poll_io_cost
         while self.tasks:
-            # t1 = time.monotonic()
-            self.timer_queue.check()  # timer
-            self._run_ready_tasks()
-            # self._poll_executor()  # executor
-            # self._run_ready_tasks()
-            # self.timer_queue.check()  # timer
-            # self._run_ready_tasks()
-            # t2 = time.monotonic()
-            # time_poll = self.tick_duration / (1 + factor_timers + factor_tasks)
-            # time_poll = min(time_poll, self.timer_queue.next_check_interval())
-            # if time_poll < 0.0:
-            #     time_poll = 0.0
+            self.timer_queue.check()
+            self.engine.run()
             if not self.tasks:
                 break
             time_poll = self.timer_queue.next_check_interval()
             LOG.debug('kernel time_poll=%.3f', time_poll)
-            self._poll_io(time_poll)  # poll_io
-            # t3 = time.monotonic()
-            self._run_ready_tasks()
-            # t4 = time.monotonic()
-            # poll_io_cost = max(0.001, t3 - t2)
-            # LOG.debug(f'kernel poll_io_cost={poll_io_cost:.3f}')
-            # factor_timers = (t2 - t1) / poll_io_cost
-            # factor_tasks = (t4 - t3) / poll_io_cost
-
-    def _run_ready_tasks(self):
-        while self.ready_tasks:
-            self.current, action, *value = self.ready_tasks.popleft()
-            if not self.current.is_alive:
-                LOG.debug('task %r not alive', self.current)
-                continue
-            try:
-                call, *args = action(*value)
-            except StopIteration as stoped:
-                self.stop_task(self.current, result=stoped.value)
-                continue
-            except TaskCanceled as ex:
-                self.stop_task(self.current, error=ex)
-                continue
-            except Exception as ex:
-                LOG.warn('task %r crash:', self.current, exc_info=True)
-                self.stop_task(self.current, error=ex)
-                continue
-            except BaseException as ex:
-                self.stop_task(self.current, error=ex)
-                raise
-            handler = getattr(self, call.__name__, None)
-            if handler is None:
-                raise RuntimeError('unknown syscall {}'.format(call.__name__))
-            handler(*args)
-
-    def _poll_io(self, time_poll):
-        for task in self.selector.poll(time_poll):
-            self.schedule_task(task, self._task_action_send)
-
-    def _on_executor_error(self, task, error):
-        self.schedule_task(task, self._task_action_throw, error)
-        task.clean_waiting()
-
-    def _on_executor_result(self, task, result):
-        self.schedule_task(task, self._task_action_send, result)
-        task.clean_waiting()
-
-    # def _poll_executor(self):
-    #     for task, result, error in self.executor.poll():
-    #         if error is None:
-    #             self.schedule_task(task, self._task_action_send, result)
-    #         else:
-    #             self.schedule_task(task, self._task_action_throw, error)
-    #         task.clean_waiting()
+            for task in self.selector.poll(time_poll):
+                self.engine.execute(task, Command.send)
+            self.engine.run()
 
     def start_task(self, coro):
         # create
-        task = KernelTask(coro, ident=self.next_task_id)
+        task = KernelTask(self, coro, ident=self.next_task_id)
         LOG.debug('start task %r', task)
         self.next_task_id = self.next_task_id + 1
         # register
         node = self.tasks.append(task)
         task.node = node
         # schedule
-        self.schedule_task(task, self._task_action_send)
+        self.engine.schedule(task, Command.send)
         return task
-
-    def schedule_task(self, task, action, *value):
-        self.ready_tasks.append((task, action, *value))
 
     def stop_task(self, task, *, result=None, error=None):
         if error:
-            LOG.debug('stop task %s with error:', task, exc_info=error)
+            if isinstance(error, TaskCanceled):
+                LOG.debug('task %r canceled', task)
+            else:
+                LOG.info('task %r crashed:', task, exc_info=error)
         else:
             LOG.debug('stop task %s', task)
         task.is_alive = False
@@ -259,90 +175,85 @@ class Kernel:
         # cleanup
         task.clean_waiting()
         for wakeup_task in task.stop_lounge.wake_all():
-            self.schedule_task(wakeup_task, self._task_action_send)
+            self.engine.schedule(wakeup_task, Command.send)
         # unregister
         self.tasks.remove(task.node)
 
+    def _on_executor_error(self, task, error):
+        self.engine.execute(task, Command.throw, error)
+        task.clean_waiting()
+
+    def _on_executor_result(self, task, result):
+        self.engine.execute(task, Command.send, result)
+        task.clean_waiting()
+
     def _timer_action_wakeup(self, timer, task):
-        # task = timer.task
         LOG.debug('task %r wakeup', task)
         task.clean_waiting()
-        self.schedule_task(task, self._task_action_send)
+        self.engine.execute(task, Command.send)
 
     def _timer_action_timeout(self, timer, task):
-        # task = timer.task
         LOG.debug('task %r timeout', task)
-        self.schedule_task(task, self._task_action_timeout, timer._nio_ref_)
+        self.engine.execute(task, Command.timeout, timer._nio_ref_)
 
     def _timer_action_cancel(self, timer, task):
-        # task = timer.task
         LOG.debug('task %r cancel', task)
-        self.schedule_task(task, self._task_action_cancel)
+        self.engine.execute(task, Command.cancel)
 
-    def _task_action_timeout(self, timer):
-        LOG.debug('throw timeout to task %r', self.current)
-        return self.current.throw(TaskTimeout(timer))
+    def syscall_handler(self, current, call, *args):
+        handler = getattr(self, call.__name__, None)
+        if handler is None:
+            raise RuntimeError('unknown syscall {}'.format(call.__name__))
+        handler(current, *args)
 
-    def _task_action_cancel(self):
-        LOG.debug('throw cancel to task %r', self.current)
-        self.current.throw_cancel()
-
-    def _task_action_throw(self, error):
-        LOG.debug('throw %r to task %r', error, self.current)
-        return self.current.throw(error)
-
-    def _task_action_send(self, value=None):
-        LOG.debug('send %r to task %r', value, self.current)
-        return self.current.send(value)
-
-    def nio_sleep(self, seconds):
+    def nio_sleep(self, current, seconds):
         timer = self.timer_queue.start_timer(
-            seconds, self._timer_action_wakeup, (self.current,))
-        self.current.clean_waiting()
-        self.current.waiting = timer
+            seconds, self._timer_action_wakeup, (current,))
+        current.clean_waiting()
+        current.waiting = timer
 
-    def nio_timeout_after(self, seconds):
+    def nio_timeout_after(self, current, seconds):
         timer = self.timer_queue.start_timer(
-            seconds, self._timer_action_timeout, (self.current,))
+            seconds, self._timer_action_timeout, (current,))
         user_timer = UserTimer(timer)
-        self.schedule_task(self.current, self._task_action_send, user_timer)
+        self.engine.execute(current, Command.send, user_timer)
 
-    def nio_unset_timer(self, user_timer):
+    def nio_unset_timer(self, current, user_timer):
         timer = user_timer._nio_ref_
         if timer is None:
             raise RuntimeError(f'timer {user_timer!r} not set in kernel')
         timer.cancel()
-        self.schedule_task(self.current, self._task_action_send)
+        self.engine.execute(current, Command.send)
 
-    def nio_spawn(self, coro, cancel_after=None):
+    def nio_spawn(self, current, coro, cancel_after=None):
         task = self.start_task(coro)
         user_task = UserTask(task)
-        self.schedule_task(self.current, self._task_action_send, user_task)
+        self.engine.execute(current, Command.send, user_task)
 
-    def nio_cancel(self, user_task):
-        task = user_task._nio_ref_
-        self.schedule_task(task, self._task_action_cancel)
-        # make sure syscall nio_cancel not raise TaskCanceled
-        self.ready_tasks.appendleft((self.current, self._task_action_send))
-
-    def nio_join(self, user_task):
+    def nio_cancel(self, current, user_task):
         task = user_task._nio_ref_
         if task.is_alive:
-            self.nio_lounge_wait(task.stop_lounge._nio_ref_)
+            self.engine.schedule(task, Command.cancel)
+        self.engine.execute(current, Command.send)
+
+    def nio_join(self, current, user_task):
+        task = user_task._nio_ref_
+        if task.is_alive:
+            self.nio_lounge_wait(current, task.stop_lounge._nio_ref_)
         else:
-            self.schedule_task(self.current, self._task_action_send)
+            self.engine.execute(current, Command.send)
 
-    def nio_current_task(self):
-        user_task = self.current._nio_ref_
-        self.schedule_task(self.current, self._task_action_send, user_task)
+    def nio_current_task(self, current):
+        user_task = current._nio_ref_
+        self.engine.execute(current, Command.send, user_task)
 
-    def nio_lounge_wait(self, user_lounge):
+    def nio_lounge_wait(self, current, user_lounge):
         lounge = KernelLounge.of(user_lounge)
-        waiter = lounge.add_waiter(self.current)
-        self.current.clean_waiting()
-        self.current.waiting = waiter
+        waiter = lounge.add_waiter(current)
+        current.clean_waiting()
+        current.waiting = waiter
 
-    def nio_lounge_wake(self, user_lounge, n):
+    def nio_lounge_wake(self, current, user_lounge, n):
         lounge = KernelLounge.of(user_lounge)
         if n == UserLounge.WAKE_ALL:
             wakeup_tasks = lounge.wake_all()
@@ -350,23 +261,23 @@ class Kernel:
             wakeup_tasks = lounge.wake(n)
         for task in wakeup_tasks:
             task.clean_waiting()
-            self.schedule_task(task, self._task_action_send)
-        self.schedule_task(self.current, self._task_action_send)
+            self.engine.schedule(task, Command.send)
+        self.engine.execute(current, Command.send)
 
-    def nio_wait_read(self, user_fd):
-        fd = self.selector.register_read(self.current, user_fd)
-        self.current.waiting = fd
+    def nio_wait_read(self, current, user_fd):
+        fd = self.selector.register_read(current, user_fd)
+        current.waiting = fd
 
-    def nio_wait_write(self, user_fd):
-        fd = self.selector.register_write(self.current, user_fd)
-        self.current.waiting = fd
+    def nio_wait_write(self, current, user_fd):
+        fd = self.selector.register_write(current, user_fd)
+        current.waiting = fd
 
-    def nio_run_in_thread(self, fn, args, kwargs):
-        fut = self.executor.run_in_thread(self.current, fn, args, kwargs)
-        self.current.clean_waiting()
-        self.current.waiting = fut
+    def nio_run_in_thread(self, current, fn, args, kwargs):
+        fut = self.executor.run_in_thread(current, fn, args, kwargs)
+        current.clean_waiting()
+        current.waiting = fut
 
-    def nio_run_in_process(self, fn, args, kwargs):
-        fut = self.executor.run_in_process(self.current, fn, args, kwargs)
-        self.current.clean_waiting()
-        self.current.waiting = fut
+    def nio_run_in_process(self, current, fn, args, kwargs):
+        fut = self.executor.run_in_process(current, fn, args, kwargs)
+        current.clean_waiting()
+        current.waiting = fut
