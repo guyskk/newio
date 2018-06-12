@@ -1,3 +1,4 @@
+from queue import Empty, Full
 from collections import deque
 from heapq import heappush, heappop
 
@@ -38,8 +39,13 @@ class Queue:
         return self.qsize() >= self.maxsize
 
     async def get(self):
-        while self.empty():
+        if self.empty():
             await self._get_waiting.wait()
+        return await self.get_nowait()
+
+    async def get_nowait(self):
+        if self.empty():
+            raise Empty()
         result = self._get()
         await self._put_waiting.notify()
         return result
@@ -52,8 +58,13 @@ class Queue:
             await self._join_waiting.wait()
 
     async def put(self, item):
-        while self.full():
+        if self.full():
             await self._put_waiting.wait()
+        self.put_nowait(item)
+
+    async def put_nowait(self, item):
+        if self.full():
+            raise Full()
         self._put(item)
         self._task_count += 1
         await self._get_waiting.notify()

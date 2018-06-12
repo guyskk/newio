@@ -5,7 +5,7 @@ async compatible version.
 '''
 import socket as std
 
-__all__ = std.__all__
+__all__ = tuple(std.__all__) + ('Socket',)
 
 from socket import *  # noqa: F401,F403
 from functools import wraps
