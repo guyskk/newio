@@ -84,8 +84,7 @@ class Kernel:
         self.timer_queue = TimerQueue(clock=self.clock)
         self.engine = Engine(self.syscall_handler)
         self.executor = Executor(
-            on_error=self._on_executor_error,
-            on_result=self._on_executor_result,
+            handler=self._executor_handler,
             max_num_thread=max_num_thread,
             max_num_process=max_num_process)
         self.main_task = None
@@ -179,25 +178,26 @@ class Kernel:
         # unregister
         self.tasks.remove(task.node)
 
-    def _on_executor_error(self, task, error):
-        self.engine.execute(task, Command.throw, error)
-        task.clean_waiting()
-
-    def _on_executor_result(self, task, result):
-        self.engine.execute(task, Command.send, result)
-        task.clean_waiting()
+    def _executor_handler(self, task, result, error):
+        if task.is_alive:
+            LOG.debug('task %r wakeup by executor', task)
+            if error is None:
+                self.engine.execute(task, Command.send, result)
+            else:
+                self.engine.execute(task, Command.throw, error)
+            task.clean_waiting()
 
     def _timer_action_wakeup(self, timer, task):
-        LOG.debug('task %r wakeup', task)
+        LOG.debug('task %r wakeup by timer %r', task, timer)
         task.clean_waiting()
         self.engine.execute(task, Command.send)
 
     def _timer_action_timeout(self, timer, task):
-        LOG.debug('task %r timeout', task)
+        LOG.debug('task %r timeout by timer %r', task, timer)
         self.engine.execute(task, Command.timeout, timer._nio_ref_)
 
     def _timer_action_cancel(self, timer, task):
-        LOG.debug('task %r cancel', task)
+        LOG.debug('task %r cancel by timer %r', task, timer)
         self.engine.execute(task, Command.cancel)
 
     def syscall_handler(self, current, call, *args):
