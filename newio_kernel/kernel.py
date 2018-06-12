@@ -216,19 +216,19 @@ class Kernel:
         timer = self.timer_queue.start_timer(
             seconds, self._timer_action_timeout, (current,))
         user_timer = UserTimer(timer)
-        self.engine.execute(current, Command.send, user_timer)
+        self.engine.schedule(current, Command.send, user_timer)
 
     def nio_unset_timer(self, current, user_timer):
         timer = user_timer._nio_ref_
         if timer is None:
             raise RuntimeError(f'timer {user_timer!r} not set in kernel')
         timer.cancel()
-        self.engine.execute(current, Command.send)
+        self.engine.schedule(current, Command.send)
 
     def nio_spawn(self, current, coro, cancel_after=None):
         task = self.start_task(coro)
         user_task = UserTask(task)
-        self.engine.execute(current, Command.send, user_task)
+        self.engine.schedule(current, Command.send, user_task)
 
     def nio_cancel(self, current, user_task):
         task = user_task._nio_ref_
@@ -241,11 +241,11 @@ class Kernel:
         if task.is_alive:
             self.nio_lounge_wait(current, task.stop_lounge._nio_ref_)
         else:
-            self.engine.execute(current, Command.send)
+            self.engine.schedule(current, Command.send)
 
     def nio_current_task(self, current):
         user_task = current._nio_ref_
-        self.engine.execute(current, Command.send, user_task)
+        self.engine.schedule(current, Command.send, user_task)
 
     def nio_lounge_wait(self, current, user_lounge):
         lounge = KernelLounge.of(user_lounge)
@@ -262,7 +262,7 @@ class Kernel:
         for task in wakeup_tasks:
             task.clean_waiting()
             self.engine.schedule(task, Command.send)
-        self.engine.execute(current, Command.send)
+        self.engine.schedule(current, Command.send)
 
     def nio_wait_read(self, current, user_fd):
         fd = self.selector.register_read(current, user_fd)
