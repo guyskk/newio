@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures import CancelledError as FutureCancelledError
 
 from newio import spawn
-from newio.channel import Channel
+from newio.channel import ThreadChannel
 
 LOG = logging.getLogger(__name__)
 
@@ -40,7 +40,8 @@ class ExecutorFuture:
             return  # ignore
         self._is_expired = True
         if error:
-            LOG.debug('executor for task %r crashed:', self._task, exc_info=error)
+            LOG.debug('executor for task %r crashed:',
+                      self._task, exc_info=error)
         else:
             LOG.debug('executor for task %r finished', self._task)
         self._handler(self._task, result, error)
@@ -51,7 +52,7 @@ class Executor:
         self._handler = handler
         self._thread_executor = ThreadPoolExecutor(max_num_thread)
         self._process_executor = ProcessPoolExecutor(max_num_process)
-        self._channel = Channel()
+        self._channel = ThreadChannel()
 
     def run_in_thread(self, task, fn, args, kwargs):
         LOG.debug('task %r run %r in executor thread', task, fn)
@@ -81,4 +82,4 @@ class Executor:
 
     def handler(self, task, result, error):
         LOG.debug('send task %r to channel', task)
-        self._channel.send((task, result, error))
+        self._channel.thread_send((task, result, error))

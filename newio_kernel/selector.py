@@ -31,7 +31,7 @@ class KernelFd:
         return self.selector_key.events
 
     def unregister(self):
-        self._selector._unregister(self._fileno)
+        self._selector._unregister(self)
 
     def __repr__(self):
         return (f'<KernelFd#{self.fileno()} of '
@@ -53,9 +53,10 @@ class Selector:
     def register_write(self, task, fileno):
         return self._register(task, fileno, EVENT_WRITE)
 
-    def _unregister(self, fileno):
+    def _unregister(self, fd):
+        fileno = fd.fileno()
         if fileno in self._fds:
-            LOG.debug('unregister fd %r', fileno)
+            LOG.debug('unregister fd %r', fd)
             del self._fds[fileno]
             self._sel.unregister(fileno)
 
@@ -65,7 +66,8 @@ class Selector:
             fd = KernelFd(self, fileno, task)
             self._fds[fileno] = fd
         if fd.task is not task:
-            raise RuntimeError('file descriptor already registered by other task')
+            raise RuntimeError(
+                'file descriptor already registered by other task')
         if fd.selector_key is None:
             LOG.debug('register fd %r, events=%r', fd, events)
             fd.selector_key = self._sel.register(fd, events)
