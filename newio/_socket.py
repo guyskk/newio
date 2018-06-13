@@ -44,6 +44,10 @@ class Socket:
     def dup(self):
         return type(self)(self._socket.dup())
 
+    @property
+    def socket(self):
+        return self._socket
+
     @contextmanager
     def blocking(self):
         '''
