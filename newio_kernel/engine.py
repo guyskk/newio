@@ -21,9 +21,11 @@ class Command:
 
     @staticmethod
     def cancel(task):
-        task.throw(TaskCanceled())
+        # task may await in finally block, try best effort to unwind stack
+        for _ in range(1000):
+            task.throw(TaskCanceled())
         message = f'failed to cancel task {task!r}, it may leak resources'
-        LOG.error(message)
+        LOG.error(message + ':\n' + task.format_stack())
         raise RuntimeError(message)
 
 
@@ -35,6 +37,9 @@ class Engine:
 
     def schedule(self, task, command, *value):
         self._tasks.append((task, command, *value))
+
+    def schedule_first(self, task, command, *value):
+        self._tasks.appendleft((task, command, *value))
 
     def execute(self, task, command, *value):
         try:

@@ -16,6 +16,7 @@ from .executor import Executor
 from .selector import Selector
 from .lounge import KernelLounge
 from .engine import Engine, Command
+from .helper import format_task_stack
 
 LOG = logging.getLogger(__name__)
 DEFAULT_MAX_NUM_PROCESS = os.cpu_count()
@@ -70,6 +71,9 @@ class KernelTask:
     def stop(self, *args, **kwargs):
         self._kernel.stop_task(self, *args, **kwargs)
 
+    def format_stack(self):
+        return format_task_stack(self)
+
 
 class Kernel:
     def __init__(
@@ -112,6 +116,7 @@ class Kernel:
         finally:
             # when main task exiting, normally cancel all subtasks
             # the first task is kernel main task, don't cancel it
+            LOG.debug('cancel all tasks, len(tasks)=%d', len(self.tasks))
             node = self.tasks.last
             while node != self.main_task.node:
                 user_task = node.value._nio_ref_
@@ -234,7 +239,7 @@ class Kernel:
         task = user_task._nio_ref_
         if task.is_alive:
             self.engine.schedule(task, Command.cancel)
-        self.engine.execute(current, Command.send)
+        self.engine.schedule_first(current, Command.send)
 
     def nio_join(self, current, user_task):
         task = user_task._nio_ref_
