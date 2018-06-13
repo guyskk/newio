@@ -31,7 +31,7 @@ class KernelFd:
         return self.selector_key.events
 
     def unregister(self):
-        self._selector._unregister(self)
+        self._selector._unregister(self._fileno)
 
     def __repr__(self):
         return (f'<KernelFd#{self.fileno()} of '
