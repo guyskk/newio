@@ -43,7 +43,7 @@ class Condition:
         await self._lounge.wake(n)
 
     async def notify_all(self):
-        return self.notify(Lounge.WAKE_ALL)
+        return await self.notify(Lounge.WAKE_ALL)
 
 
 class Semaphore:

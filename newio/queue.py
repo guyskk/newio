@@ -39,7 +39,7 @@ class Queue:
         return self.qsize() >= self.maxsize
 
     async def get(self):
-        if self.empty():
+        while self.empty():
             await self._get_waiting.wait()
         return await self.get_nowait()
 
@@ -58,9 +58,9 @@ class Queue:
             await self._join_waiting.wait()
 
     async def put(self, item):
-        if self.full():
+        while self.full():
             await self._put_waiting.wait()
-        self.put_nowait(item)
+        await self.put_nowait(item)
 
     async def put_nowait(self, item):
         if self.full():

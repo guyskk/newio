@@ -17,32 +17,37 @@ class ChannelClosed(Exception):
 
 
 class Channel:
-    '''Message channel for threads and coroutines'''
+    '''Message channel for communicating between threads and coroutines'''
 
     def __init__(self, maxsize=0):
         self._notify_producer, self._notify_consumer = socketpair()
+        self._wakeup_consumer, self._wakeup_producer = \
+            self._notify_producer, self._notify_consumer
         self._queue = ThreadQueue(maxsize)
         self._send_waiting = Condition()
         self._recv_waiting = Condition()
         self._broker_waiting = Condition()
         self._num_consumer = 0
         self._num_producer = 0
-        self._broker_task = None
         self._is_closed = False
         # a timeout to avoid threads block on closed channel
         self._blocking_timeout = 0.1
+        self._consumer_broker = None
+        self._producer_broker = None
 
     async def __aenter__(self):
         if self._is_closed:
             raise RuntimeError('Channel already closed')
-        self._broker_task = await spawn(self.channel_broker())
+        self._consumer_broker = await spawn(self.channel_consumer_broker())
+        self._producer_broker = await spawn(self.channel_producer_broker())
         return self
 
     async def __aexit__(self, *exc_info):
         self._is_closed = True
         await self._send_waiting.notify_all()
         await self._recv_waiting.notify_all()
-        await self._broker_task.cancel()
+        await self._consumer_broker.cancel()
+        await self._producer_broker.cancel()
         await self._notify_producer.close()
         await self._notify_consumer.close()
 
@@ -109,7 +114,6 @@ class Channel:
                 try:
                     self._queue.put_nowait(item)
                 except QUEUE_FULL:
-                    await self._broker_waiting.notify()
                     await self._send_waiting.wait()
                 else:
                     break
@@ -126,7 +130,6 @@ class Channel:
                 except QUEUE_EMPTY:
                     if self._is_closed:
                         raise ChannelClosed() from None
-                    await self._broker_waiting.notify()
                     await self._recv_waiting.wait()
                 else:
                     break
@@ -134,17 +137,12 @@ class Channel:
             self._num_consumer -= 1
         return item
 
-    async def channel_broker(self):
-        wakeup_consumer, wakeup_producer = \
-            self._notify_producer, self._notify_consumer
+    async def channel_consumer_broker(self):
         while True:
-            if self._num_consumer > 0:
-                LOG.debug('broker of channel %r wait wakeup_consumer', self)
-                await wakeup_consumer.recv(1)
-                await self._recv_waiting.notify()
-            elif self._num_producer > 0:
-                LOG.debug('broker of channel %r wait wakeup_producer', self)
-                await wakeup_producer.recv(1)
-                await self._send_waiting.notify()
-            else:
-                await self._broker_waiting.wait()
+            nbytes = await self._wakeup_consumer.recv(128)
+            await self._recv_waiting.notify(len(nbytes))
+
+    async def channel_producer_broker(self):
+        while True:
+            nbytes = await self._wakeup_producer.recv(128)
+            await self._send_waiting.notify(len(nbytes))
