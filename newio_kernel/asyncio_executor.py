@@ -81,10 +81,12 @@ class AsyncioExecutor:
         LOG.debug('asyncio executor worker starting')
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(self._asyncio_worker(loop))
+        loop.create_task(self._asyncio_worker())
+        loop.run_forever()
         loop.close()
 
-    async def _asyncio_worker(self, loop):
+    async def _asyncio_worker(self):
+        loop = asyncio.get_event_loop()
         is_exiting = False
         while True:
             try:
@@ -92,6 +94,7 @@ class AsyncioExecutor:
             except Empty:
                 if is_exiting:
                     self._wakeup.close()
+                    loop.stop()
                     break
                 nbytes = await loop.sock_recv(self._wakeup, 128)
                 if not nbytes or b'x' in nbytes:
