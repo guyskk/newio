@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures import CancelledError as FutureCancelledError
 from threading import Lock as ThreadLock
 from queue import Queue as ThreadQueue
-from queue import Empty as QUEUE_EMPTY
+from queue import Empty
 
 from newio import spawn
 from newio.socket import socketpair
@@ -84,7 +84,7 @@ class Executor:
         while True:
             try:
                 task, result, error = self._queue.get_nowait()
-            except QUEUE_EMPTY:
+            except Empty:
                 if is_exiting:
                     break
                 nbytes = await self._wakeup.recv(128)
@@ -112,7 +112,7 @@ class Executor:
         self._asyncio_executor.shutdown(wait=wait)
 
     def handler(self, task, result, error):
-        self._queue.put((task, result, error), timeout=0.1)
+        self._queue.put_nowait((task, result, error))
         if self._is_exiting:
             return
         with self._notify_lock:
