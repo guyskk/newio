@@ -117,15 +117,17 @@ class Kernel:
             # when main task exiting, normally cancel all subtasks
             # the first task is kernel main task, don't cancel it
             LOG.debug('cancel all tasks, len(tasks)=%d', len(self.tasks))
-            node = self.tasks.last
-            while node != self.main_task.node:
-                user_task = node.value._nio_ref_
-                if user_task.is_alive:
-                    await user_task.cancel()
-                node = node.prev
-            while len(self.tasks) > 1:
-                user_task = self.tasks.last.value._nio_ref_
-                await user_task.join()
+            if len(self.tasks) > 1:
+                node = self.tasks.last
+                while node != self.executor.agent_task._nio_ref_.node:
+                    user_task = node.value._nio_ref_
+                    if user_task.is_alive:
+                        await user_task.cancel()
+                    node = node.prev
+                while len(self.tasks) > 2:
+                    user_task = self.tasks.last.value._nio_ref_
+                    await user_task.join()
+                await self.executor.stop()
 
     def close(self, wait=True):
         '''normal exit'''

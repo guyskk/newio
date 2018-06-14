@@ -24,7 +24,6 @@ def _get_stack(coro):
             # from an asynchronous generator.  See https://bugs.python.org/issue32810
             f = None
             coro = None
-
         if f is not None:
             frames.append(f)
     return frames

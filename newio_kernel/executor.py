@@ -1,9 +1,12 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from concurrent.futures import CancelledError as FutureCancelledError
+from threading import Lock as ThreadLock
+from queue import Queue as ThreadQueue
+from queue import Empty as QUEUE_EMPTY
 
 from newio import spawn
-from newio.channel import ThreadChannel
+from newio.socket import socketpair
 
 LOG = logging.getLogger(__name__)
 
@@ -31,6 +34,7 @@ class ExecutorFuture:
     def _on_fn_done(self, fut):
         if self._is_expired:
             return
+        self._is_expired = True
         result = error = None
         try:
             error = fut.exception()
@@ -38,7 +42,6 @@ class ExecutorFuture:
                 result = fut.result()
         except FutureCancelledError:
             return  # ignore
-        self._is_expired = True
         if error:
             LOG.debug('executor for task %r crashed:',
                       self._task, exc_info=error)
@@ -52,7 +55,11 @@ class Executor:
         self._handler = handler
         self._thread_executor = ThreadPoolExecutor(max_num_thread)
         self._process_executor = ProcessPoolExecutor(max_num_process)
-        self._channel = ThreadChannel()
+        self._notify, self._wakeup = socketpair()
+        self._queue = ThreadQueue(1024)
+        self.agent_task = None
+        self._is_exiting = False
+        self._notify_lock = ThreadLock()
 
     def run_in_thread(self, task, fn, args, kwargs):
         LOG.debug('task %r run %r in executor thread', task, fn)
@@ -64,22 +71,41 @@ class Executor:
         fut = self._process_executor.submit(fn, *args, **kwargs)
         return ExecutorFuture(self.handler, task, fut)
 
-    async def executor_main(self):
-        async for task, result, error in self._channel:
-            LOG.debug('recv task %r from channel', task)
-            self._handler(task, result, error)
+    async def executor_agent(self):
+        is_exiting = False
+        while True:
+            try:
+                task, result, error = self._queue.get_nowait()
+            except QUEUE_EMPTY:
+                if is_exiting:
+                    break
+                nbytes = await self._wakeup.recv(128)
+                if not nbytes or b'x' in nbytes:
+                    LOG.debug('executor agent exiting')
+                    is_exiting = True
+                    await self._wakeup.close()
+            else:
+                self._handler(task, result, error)
 
     async def start(self):
-        await self._channel.__aenter__()
-        await spawn(self.executor_main())
+        self.agent_task = await spawn(self.executor_agent())
 
     async def stop(self):
-        await self._channel.__aexit__()
+        LOG.debug('executor exiting')
+        self._is_exiting = True
+        with self._notify_lock:
+            await self._notify.sendall(b'x')
+            await self._notify.close()
+        await self.agent_task.join()
 
     def shutdown(self, wait=True):
         self._thread_executor.shutdown(wait=wait)
         self._process_executor.shutdown(wait=wait)
 
     def handler(self, task, result, error):
-        LOG.debug('send task %r to channel', task)
-        self._channel.thread_send((task, result, error))
+        self._queue.put((task, result, error), timeout=0.1)
+        if self._is_exiting:
+            return
+        with self._notify_lock:
+            with self._notify.blocking() as notify:
+                notify.sendall(b'1')
