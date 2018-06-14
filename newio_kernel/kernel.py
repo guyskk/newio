@@ -288,3 +288,8 @@ class Kernel:
         fut = self.executor.run_in_process(current, fn, args, kwargs)
         current.clean_waiting()
         current.waiting = fut
+
+    def nio_run_in_asyncio(self, current, coro):
+        fut = self.executor.run_in_asyncio(current, coro)
+        current.clean_waiting()
+        current.waiting = fut

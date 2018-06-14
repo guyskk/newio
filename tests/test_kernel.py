@@ -1,4 +1,5 @@
 import pytest
+import logging
 import newio as nio
 from newio_kernel import run
 
@@ -21,7 +22,7 @@ def test_shutdown():
 
 
 @run_it
-async def test_cancel_dead_task():
+async def test_cancel_dead_task(caplog):
     async def dead_task():
         while True:
             try:
@@ -29,7 +30,11 @@ async def test_cancel_dead_task():
             except BaseException:
                 pass
     task = await nio.spawn(dead_task())
-    await task.cancel()
-    await task.join()
+    caplog.clear()
+    with caplog.at_level(logging.ERROR):
+        await task.cancel()
+        await task.join()
+    for record in caplog.records:
+        assert 'failed to cancel task' in record.message
     assert not task.is_alive
     assert task.error is not None

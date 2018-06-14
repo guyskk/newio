@@ -1,4 +1,7 @@
+import logging
 from newio_kernel.timer import TimerQueue
+
+LOG = logging.getLogger(__name__)
 
 
 class MockClock:
@@ -25,7 +28,7 @@ def test_check():
     t2 = timerqueue.start_timer(1, append, ('#2 expired',))
     t3 = timerqueue.start_timer(100, append, ('#3 expired',))
     t4 = timerqueue.start_timer(1000, append, ('#4 expired',))
-    print(t1, t2, t3, t4)
+    LOG.debug((t1, t2, t3, t4))
 
     timerqueue.check()
     assert not logs

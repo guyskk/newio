@@ -8,6 +8,8 @@ from queue import Empty as QUEUE_EMPTY
 from newio import spawn
 from newio.socket import socketpair
 
+from .asyncio_executor import AsyncioExecutor
+
 LOG = logging.getLogger(__name__)
 
 
@@ -55,6 +57,7 @@ class Executor:
         self._handler = handler
         self._thread_executor = ThreadPoolExecutor(max_num_thread)
         self._process_executor = ProcessPoolExecutor(max_num_process)
+        self._asyncio_executor = AsyncioExecutor()
         self._notify, self._wakeup = socketpair()
         self._queue = ThreadQueue(1024)
         self.agent_task = None
@@ -62,13 +65,18 @@ class Executor:
         self._notify_lock = ThreadLock()
 
     def run_in_thread(self, task, fn, args, kwargs):
-        LOG.debug('task %r run %r in executor thread', task, fn)
+        LOG.debug('task %r run %r in thread executor', task, fn)
         fut = self._thread_executor.submit(fn, *args, **kwargs)
         return ExecutorFuture(self.handler, task, fut)
 
     def run_in_process(self, task, fn, args, kwargs):
-        LOG.debug('task %r run %r in executor process', task, fn)
+        LOG.debug('task %r run %r in process executor', task, fn)
         fut = self._process_executor.submit(fn, *args, **kwargs)
+        return ExecutorFuture(self.handler, task, fut)
+
+    def run_in_asyncio(self, task, coro):
+        LOG.debug('task %r run %r in asyncio executor', task, coro)
+        fut = self._asyncio_executor.submit(coro)
         return ExecutorFuture(self.handler, task, fut)
 
     async def executor_agent(self):
@@ -101,6 +109,7 @@ class Executor:
     def shutdown(self, wait=True):
         self._thread_executor.shutdown(wait=wait)
         self._process_executor.shutdown(wait=wait)
+        self._asyncio_executor.shutdown(wait=wait)
 
     def handler(self, task, result, error):
         self._queue.put((task, result, error), timeout=0.1)
