@@ -273,7 +273,7 @@ def nio_lounge_wake(lounge: Lounge, n: int) -> None:
 
 @coroutine
 def nio_run_in_thread(fn, *args, **kwargs):
-    '''Run fn in thread pool
+    '''Run fn in thread executor
 
     Raises:
         TaskTimeout: task timeout
@@ -284,10 +284,21 @@ def nio_run_in_thread(fn, *args, **kwargs):
 
 @coroutine
 def nio_run_in_process(fn, *args, **kwargs):
-    '''Run fn in process pool
+    '''Run fn in process executor
 
     Raises:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     '''
     return (yield (nio_run_in_process, fn, args, kwargs))
+
+
+@coroutine
+def nio_run_in_asyncio(coro):
+    '''Run fn in asyncio executor
+
+    Raises:
+        TaskTimeout: task timeout
+        TaskCanceled: task canceled
+    '''
+    return (yield (nio_run_in_asyncio, coro))

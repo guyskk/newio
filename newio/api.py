@@ -5,13 +5,15 @@ from .syscall import TaskCanceled, TaskTimeout, Timer, Task, Lounge
 __all__ = (
     'TaskCanceled', 'TaskTimeout', 'Task', 'Timer', 'Lounge',
     'wait_read', 'wait_write', 'sleep', 'spawn', 'current_task',
-    'timeout_after', 'open_nursery', 'run_in_thread', 'run_in_process',
+    'run_in_thread', 'run_in_process', 'run_in_asyncio',
+    'timeout_after', 'open_nursery',
 )
 
 wait_read = syscall.nio_wait_read
 wait_write = syscall.nio_wait_write
 run_in_thread = syscall.nio_run_in_thread
 run_in_process = syscall.nio_run_in_process
+run_in_asyncio = syscall.nio_run_in_asyncio
 sleep = syscall.nio_sleep
 spawn = syscall.nio_spawn
 current_task = syscall.nio_current_task
