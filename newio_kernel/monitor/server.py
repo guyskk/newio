@@ -14,7 +14,6 @@ REQUEST_MAX_SIZE = 1024 * 8
 COMMANDS = {
     'get_task_list',
     'get_task',
-    'get_task_stack',
     'cancel_task',
 }
 

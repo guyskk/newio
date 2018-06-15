@@ -52,9 +52,9 @@ class MonitorShell:
         while True:
             sout('Monitor> ')
             try:
-                line = sys.stdin.readline()
+                line = input()
                 self.handler(line)
-            except KeyboardInterrupt:
+            except EOFError:
                 break
 
     def command_ps(self, ident=None):
@@ -63,22 +63,35 @@ class MonitorShell:
         else:
             return self._show_task(int(ident))
 
+    def command_kill(self, ident):
+        return self._cancel_task(int(ident))
+
+    def command_help(self):
+        self._show_help()
+
+    def _show_help(self):
+        sout(
+            '    ps           : Show task table\n'
+            '    ps <ID>      : Show detail of an task\n'
+            '    kill <ID>    : Cancel an task\n'
+            '    Ctrl+C       : Leave the monitor\n'
+        )
+
     def _show_task_list(self):
         tasks = self.client.get_task_list()
-        data = [('ID', 'Name', 'State', 'Waiting', 'Error', 'Result')]
+        data = [('ID', 'Name', 'State', 'Waiting', 'Error/Result')]
         for task in tasks:
-            error = task['error']
-            if error:
-                error = Fore.RED + error
+            error_or_result = None
+            if task['error']:
+                error_or_result = Fore.RED + task['error']
             else:
-                error = ''
+                error_or_result = task['result'] or ''
             data.append((
                 task['ident'],
                 task['name'],
                 task['state'],
                 task['waiting'] or '',
-                error,
-                task['result'] or '',
+                error_or_result,
             ))
         table = AsciiTable(data)
         sout(table.table)
@@ -86,26 +99,49 @@ class MonitorShell:
 
     def _show_task(self, ident):
         task = self.client.get_task(ident)
-        for k in ['ident', 'name', 'state', 'waiting', 'error']:
-            sout(f'{k:>8}: {task[k]}\n')
-        error_detail = (task['error_detail'] or '').strip()
-        if error_detail:
+        task_stack = task['stack'].strip()
+        for k in ['ident', 'name', 'state', 'waiting', 'error_type', 'error']:
+            sout(f'{k:>12}: {task[k]}\n')
+        if task_stack:
             sout('-' * 60 + '\n')
-            sout(error_detail + '\n')
+            sout(task_stack + '\n')
+            sout('-' * 60 + '\n')
+
+    def _cancel_task(self, ident):
+        task = self.client.cancel_task(ident)
+        error_type = task['error_type']
+        if error_type and error_type != 'TaskCanceled':
+            sout(f'task #{ident} not well canceled, it may leak resources\n')
+        else:
+            sout(f'task #{ident} successfully canceled\n')
+        task_stack = task['stack'].strip()
+        if task_stack:
+            sout('-' * 60 + '\n')
+            sout(task_stack + '\n')
+            sout('-' * 60 + '\n')
 
 
 def main():
-    if len(sys.argv) != 2:
+    if len(sys.argv) > 2:
         print("Usage: python -m newio_kernel.monitor <HOST:PORT>")
         return
-    host_port = sys.argv[1]
-    if host_port in ['-h', '--help']:
-        print("Usage: python -m newio_kernel.monitor <HOST:PORT>")
-        return
-    if host_port == '-':
-        host, port = MONITOR_HOST, MONITOR_PORT
+    if len(sys.argv) == 2:
+        host_port = sys.argv[1]
+        if host_port in ['-h', '--help']:
+            print("Usage: python -m newio_kernel.monitor <HOST:PORT>")
+            return
+        try:
+            host, port = host_port.split(':')
+            port = int(port)
+        except Exception:
+            print(f'Invalid host:port {host_port!r}')
+            return
     else:
-        host, port = host_port.split(':')
-        port = int(port)
+        host, port = MONITOR_HOST, MONITOR_PORT
     shell = MonitorShell(host, port)
-    shell.main()
+    try:
+        shell.main()
+    except KeyboardInterrupt:
+        pass
+    except ConnectionError as ex:
+        print(ex)
