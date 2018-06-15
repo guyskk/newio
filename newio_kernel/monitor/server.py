@@ -33,6 +33,7 @@ class MonitorServer:
         self._channel = ThreadChannel()
         self._agent = None
         self._server = Thread(target=self.monitor_server, daemon=True)
+        self._stoped = False
 
     async def start(self):
         LOG.debug('Monitor server starting')
@@ -42,6 +43,7 @@ class MonitorServer:
 
     async def stop(self):
         LOG.debug('Monitor server stopping')
+        self._stoped = True
         if self._channel is not None:
             await self._channel.__aexit__()
         if self._agent is not None:
@@ -50,19 +52,26 @@ class MonitorServer:
     def monitor_server(self):
         server = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.settimeout(0.2)
         server.bind((self.host, self.port))
         server.listen(1)
         host, port = server.getsockname()
         print(f'Monitor server listening at tcp://{host}:{port}')
         with server:
             while True:
-                client, address = server.accept()
+                if self._stoped:
+                    break
+                try:
+                    client, address = server.accept()
+                except socket.timeout:
+                    continue
                 with client:
                     try:
                         self.client_handler(client, address)
                     except Exception:
                         msg = f'Connection #{client.fileno()} crashed:'
                         LOG.warn(msg, exc_info=True)
+        LOG.info('Monitor server stoped')
 
     def client_handler(self, client, address):
         host, port = address

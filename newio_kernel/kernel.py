@@ -134,7 +134,6 @@ class Kernel:
                     self.api, host=MONITOR_HOST, port=MONITOR_PORT)
                 await self.monitor_server.start()
             self.kernel_tasks.update(set(self.tasks))
-            print(self.kernel_tasks)
             return await coro
         finally:
             # when main task exiting, normally cancel all subtasks
