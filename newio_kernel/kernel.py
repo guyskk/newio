@@ -4,6 +4,8 @@ Newio Kernel
 import os
 import time
 import logging
+from inspect import isawaitable
+
 from pyllist import dllist
 
 from newio.syscall import Task as UserTask
@@ -17,10 +19,16 @@ from .selector import Selector
 from .lounge import KernelLounge
 from .engine import Engine, Command
 from .helper import format_task_stack
+from .kernel_api import KernelApi
+from .monitor import MonitorServer
 
 LOG = logging.getLogger(__name__)
 DEFAULT_MAX_NUM_PROCESS = os.cpu_count()
 DEFAULT_MAX_NUM_THREAD = DEFAULT_MAX_NUM_PROCESS * 16
+
+MONITOR_ENABLE = bool(os.getenv('NEWIO_KERNEL_MONITOR'))
+MONITOR_HOST = str(os.getenv('NEWIO_KERNEL_MONITOR_HOST') or '127.0.0.1')
+MONITOR_PORT = int(os.getenv('NEWIO_KERNEL_MONITOR_PORT') or 49802)
 
 
 class Runner:
@@ -51,7 +59,8 @@ class KernelTask:
         self.result = None
         self.waiting = None
 
-    def __repr__(self):
+    @property
+    def state(self):
         if self.is_alive:
             if self.waiting is None:
                 state = 'ready'
@@ -61,7 +70,11 @@ class KernelTask:
             state = 'error'
         else:
             state = 'stoped'
-        return '<KernelTask#{} {} @{}>'.format(self.ident, self.name, state)
+        return state
+
+    def __repr__(self):
+        return '<KernelTask#{} {} @{}>'.format(
+            self.ident, self.name, self.state)
 
     def clean_waiting(self):
         if self.waiting:
@@ -92,6 +105,9 @@ class Kernel:
             max_num_thread=max_num_thread,
             max_num_process=max_num_process)
         self.main_task = None
+        self.kernel_tasks = set()
+        self.api = KernelApi(self)
+        self.monitor_server = None
 
     def run(self, coro, timeout=None):
         self.main_task = self.start_task(self.kernel_main(coro))
@@ -110,24 +126,30 @@ class Kernel:
         return self.main_task.result
 
     async def kernel_main(self, coro):
+        self.kernel_tasks.update(set(self.tasks))
         try:
             await self.executor.start()
+            if MONITOR_ENABLE:
+                self.monitor_server = MonitorServer(
+                    self.api, host=MONITOR_HOST, port=MONITOR_PORT)
+                await self.monitor_server.start()
+            self.kernel_tasks.update(set(self.tasks))
+            print(self.kernel_tasks)
             return await coro
         finally:
             # when main task exiting, normally cancel all subtasks
-            # the first task is kernel main task, don't cancel it
             LOG.debug('cancel all tasks, len(tasks)=%d', len(self.tasks))
+            tasks = set(self.tasks) - self.kernel_tasks
+            for task in tasks:
+                user_task = task._nio_ref_
+                if user_task.is_alive:
+                    await user_task.cancel()
+                await user_task.join()
+            if self.monitor_server:
+                await self.monitor_server.stop()
+            await self.executor.stop()
             if len(self.tasks) > 1:
-                node = self.tasks.last
-                while node != self.executor.agent_task._nio_ref_.node:
-                    user_task = node.value._nio_ref_
-                    if user_task.is_alive:
-                        await user_task.cancel()
-                    node = node.prev
-                while len(self.tasks) > 2:
-                    user_task = self.tasks.last.value._nio_ref_
-                    await user_task.join()
-                await self.executor.stop()
+                LOG.error('Unfinished tasks: %r', self.tasks)
 
     def close(self, wait=True):
         '''normal exit'''
@@ -150,7 +172,6 @@ class Kernel:
             if not self.tasks:
                 break
             time_poll = self.timer_queue.next_check_interval()
-            LOG.debug('kernel time_poll=%.3f', time_poll)
             for task in self.selector.poll(time_poll):
                 self.engine.execute(task, Command.send)
             self.engine.run()
@@ -233,6 +254,10 @@ class Kernel:
         self.engine.schedule(current, Command.send)
 
     def nio_spawn(self, current, coro, cancel_after=None):
+        if not isawaitable(coro):
+            error = ValueError(f'can not spawn {coro}, it not awaitable!')
+            self.engine.schedule(current, Command.throw, error)
+            return
         task = self.start_task(coro)
         user_task = UserTask(task)
         self.engine.schedule(current, Command.send, user_task)
