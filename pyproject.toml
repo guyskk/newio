@@ -4,10 +4,6 @@ version = "0.3.0"
 description = "Newio"
 authors = ["guyskk <guyskk@qq.com>"]
 
-[[tool.poetry.source]]
-name = "local"
-url = "http://127.0.0.1:8501"
-
 [tool.poetry.dependencies]
 python = ">=3.6"
 
