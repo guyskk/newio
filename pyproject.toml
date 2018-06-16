@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "newio-kernel"
 version = "0.1.0"
-description = ""
+description = "Newio Kernel"
 authors = ["guyskk <guyskk@qq.com>"]
 
 [[tool.poetry.source]]
@@ -9,12 +9,13 @@ name = "local"
 url = "http://127.0.0.1:8501"
 
 [tool.poetry.dependencies]
-python = "*"
-newio = "^0.1.0"
-llist = "^0.5.0"
-pytest-cov = "^2.5"
+python = ">=3.6"
+newio = "^0.2.0"
+terminaltables = "^3.1"
+pyllist = "^0.3.0"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.5"
+pytest-cov = "^2.5"
 invoke = "^1.0"
 coloredlogs = "^10.0"

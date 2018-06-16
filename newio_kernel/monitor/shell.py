@@ -1,7 +1,5 @@
 import sys
 import re
-import colorama
-from colorama import Fore
 from terminaltables import AsciiTable
 
 from newio_kernel.kernel import MONITOR_HOST, MONITOR_PORT
@@ -36,7 +34,7 @@ class MonitorShell:
         kwargs = {}
         command_handler = getattr(self, 'command_' + command, None)
         if command_handler is None:
-            sout(f'Unknown command {command}\n')
+            sout(f'unknown command {command}\n')
             return
         try:
             command_handler(*args, **kwargs)
@@ -44,7 +42,6 @@ class MonitorShell:
             sout(str(ex) + '\n')
 
     def main(self):
-        colorama.init()
         sout(f'Monitor connect to {self.host}:{self.port}\n')
         self.client = MonitorClient(self.host, self.port)
         num_tasks = len(self.client.get_task_list())
@@ -79,19 +76,13 @@ class MonitorShell:
 
     def _show_task_list(self):
         tasks = self.client.get_task_list()
-        data = [('ID', 'Name', 'State', 'Waiting', 'Error/Result')]
+        data = [('ID', 'Name', 'State', 'Waiting')]
         for task in tasks:
-            error_or_result = None
-            if task['error']:
-                error_or_result = Fore.RED + task['error']
-            else:
-                error_or_result = task['result'] or ''
             data.append((
                 task['ident'],
                 task['name'],
                 task['state'],
                 task['waiting'] or '',
-                error_or_result,
             ))
         table = AsciiTable(data)
         sout(table.table)
@@ -99,9 +90,9 @@ class MonitorShell:
 
     def _show_task(self, ident):
         task = self.client.get_task(ident)
+        for k in ['ident', 'name', 'state', 'waiting']:
+            sout(f'{k:>8}: {task[k]}\n')
         task_stack = task['stack'].strip()
-        for k in ['ident', 'name', 'state', 'waiting', 'error_type', 'error']:
-            sout(f'{k:>12}: {task[k]}\n')
         if task_stack:
             sout('-' * 60 + '\n')
             sout(task_stack + '\n')
