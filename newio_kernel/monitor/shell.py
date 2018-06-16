@@ -6,6 +6,7 @@ from newio_kernel.kernel import MONITOR_HOST, MONITOR_PORT
 from .client import MonitorClient, MonitorApiError
 
 try:
+    # provide elaborate line editing and history features
     import readline  # noqa
 except ImportError:
     pass
@@ -47,9 +48,8 @@ class MonitorShell:
         num_tasks = len(self.client.get_task_list())
         sout(f'{num_tasks} tasks running, type help for commands!\n')
         while True:
-            sout('Monitor> ')
             try:
-                line = input()
+                line = input('Monitor> ')
                 self.handler(line)
             except EOFError:
                 break
