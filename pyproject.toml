@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "newio"
-version = "0.1.0"
-description = ""
+version = "0.3.0"
+description = "Newio"
 authors = ["guyskk <guyskk@qq.com>"]
 
 [[tool.poetry.source]]
@@ -13,3 +13,4 @@ python = ">=3.6"
 
 [tool.poetry.dev-dependencies]
 pytest = "^3.5"
+pytest-cov = "^2.5"
