@@ -4,10 +4,6 @@ version = "0.2.0"
 description = "Newio Kernel"
 authors = ["guyskk <guyskk@qq.com>"]
 
-[[tool.poetry.source]]
-name = "local"
-url = "http://127.0.0.1:8501"
-
 [tool.poetry.dependencies]
 python = ">=3.6"
 newio = "^0.2.0"
