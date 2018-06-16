@@ -26,9 +26,8 @@ LOG = logging.getLogger(__name__)
 DEFAULT_MAX_NUM_PROCESS = os.cpu_count()
 DEFAULT_MAX_NUM_THREAD = DEFAULT_MAX_NUM_PROCESS * 16
 
-MONITOR_ENABLE = bool(os.getenv('NEWIO_KERNEL_MONITOR'))
-MONITOR_HOST = str(os.getenv('NEWIO_KERNEL_MONITOR_HOST') or '127.0.0.1')
-MONITOR_PORT = int(os.getenv('NEWIO_KERNEL_MONITOR_PORT') or 49802)
+MONITOR_DEFAULT_HOST = '127.0.0.1'
+MONITOR_DEFAULT_PORT = 49802
 
 
 class Runner:
@@ -43,6 +42,15 @@ class Runner:
         return kernel.run(*args, **kwargs)
 
 
+def _get_task_name(coro):
+    name = getattr(coro, '__qualname__', None)
+    if name is None:
+        name = getattr(coro, '__name__', None)
+    if name is None:
+        return str(coro)
+    return name
+
+
 class KernelTask:
     def __init__(self, kernel, coro, *, ident):
         self._nio_ref_ = None
@@ -51,7 +59,7 @@ class KernelTask:
         self.send = coro.send
         self.throw = coro.throw
         self.ident = ident
-        self.name = getattr(coro, '__name__', str(coro))
+        self.name = _get_task_name(coro)
         self.is_alive = True
         self.node = None
         self.stop_lounge = KernelLounge(UserLounge())
@@ -93,6 +101,9 @@ class Kernel:
         self,
         max_num_thread=DEFAULT_MAX_NUM_THREAD,
         max_num_process=DEFAULT_MAX_NUM_PROCESS,
+        monitor_enable=False,
+        monitor_host=MONITOR_DEFAULT_HOST,
+        monitor_port=MONITOR_DEFAULT_PORT,
     ):
         self.next_task_id = 0
         self.tasks = dllist()
@@ -107,7 +118,27 @@ class Kernel:
         self.main_task = None
         self.kernel_tasks = set()
         self.api = KernelApi(self)
+        self.monitor_enable = monitor_enable
+        self.monitor_host = monitor_host
+        self.monitor_port = monitor_port
         self.monitor_server = None
+
+    async def _start_monitor_server(self):
+        monitor_enable = os.getenv('NEWIO_KERNEL_MONITOR')
+        monitor_host = os.getenv('NEWIO_KERNEL_MONITOR_HOST')
+        monitor_port = os.getenv('NEWIO_KERNEL_MONITOR_PORT')
+        if monitor_enable == '0':
+            self.monitor_enable = False
+        elif monitor_enable == '1':
+            self.monitor_enable = True
+        if monitor_host:
+            self.monitor_host = monitor_host
+        if monitor_port:
+            self.monitor_port = monitor_port
+        if self.monitor_enable:
+            self.monitor_server = MonitorServer(
+                self.api, host=self.monitor_host, port=self.monitor_port)
+            await self.monitor_server.start()
 
     def run(self, coro, timeout=None):
         self.main_task = self.start_task(self.kernel_main(coro))
@@ -129,10 +160,7 @@ class Kernel:
         self.kernel_tasks.update(set(self.tasks))
         try:
             await self.executor.start()
-            if MONITOR_ENABLE:
-                self.monitor_server = MonitorServer(
-                    self.api, host=MONITOR_HOST, port=MONITOR_PORT)
-                await self.monitor_server.start()
+            await self._start_monitor_server()
             self.kernel_tasks.update(set(self.tasks))
             return await coro
         finally:

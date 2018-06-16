@@ -6,7 +6,7 @@ authors = ["guyskk <guyskk@qq.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.6"
-newio = "^0.2.0"
+newio = ">=0.3.0"
 terminaltables = "^3.1"
 pyllist = "^0.3.0"
 

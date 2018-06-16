@@ -2,7 +2,7 @@ import sys
 import re
 from terminaltables import AsciiTable
 
-from newio_kernel.kernel import MONITOR_HOST, MONITOR_PORT
+from newio_kernel.kernel import MONITOR_DEFAULT_HOST, MONITOR_DEFAULT_PORT
 from .client import MonitorClient, MonitorApiError
 
 try:
@@ -128,7 +128,7 @@ def main():
             print(f'Invalid host:port {host_port!r}')
             return
     else:
-        host, port = MONITOR_HOST, MONITOR_PORT
+        host, port = MONITOR_DEFAULT_HOST, MONITOR_DEFAULT_PORT
     shell = MonitorShell(host, port)
     try:
         shell.main()
