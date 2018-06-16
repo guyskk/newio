@@ -244,16 +244,19 @@ class Kernel:
 
     def _timer_action_wakeup(self, timer, task):
         LOG.debug('task %r wakeup by timer %r', task, timer)
-        task.clean_waiting()
-        self.engine.execute(task, Command.send)
+        if task.is_alive:
+            task.clean_waiting()
+            self.engine.execute(task, Command.send)
 
     def _timer_action_timeout(self, timer, task):
         LOG.debug('task %r timeout by timer %r', task, timer)
-        self.engine.execute(task, Command.timeout, timer._nio_ref_)
+        if task.is_alive:
+            self.engine.execute(task, Command.timeout, timer._nio_ref_)
 
     def _timer_action_cancel(self, timer, task):
         LOG.debug('task %r cancel by timer %r', task, timer)
-        self.engine.execute(task, Command.cancel)
+        if task.is_alive:
+            self.engine.execute(task, Command.cancel)
 
     def syscall_handler(self, current, call, *args):
         handler = getattr(self, call.__name__, None)
