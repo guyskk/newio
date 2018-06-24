@@ -1,0 +1,3 @@
+include tools/requires-dev.txt
+include tools/requires-newio.txt
+include tools/requires-kernel.txt
