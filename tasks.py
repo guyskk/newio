@@ -48,7 +48,7 @@ def publish(ctx, target='all'):
     build(ctx, target=target)
     version = _newio.__version__
     for pkg in _get_targets(target):
-        cmd = f'twine upload {pkg}-{version}.tar.gz'
+        cmd = f'twine upload dist/{pkg}-{version}.tar.gz'
         ctx.run(cmd)
 
 
