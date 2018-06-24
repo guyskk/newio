@@ -19,7 +19,7 @@ async def echo_handler(client, address):
             await client.sendall(data)
 
 
-async def echo_server(host, port):
+async def start_echo_server(host, port):
     print(f'Echo server pid={os.getpid()}, listening at tcp://{host}:{port}')
     server = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
