@@ -2,7 +2,7 @@ import _newio
 from setuptools import setup
 
 version = _newio.__version__
-requires = _newio.parse_requires('tools/requires-kernel.txt')
+requires = _newio.parse_requires('tools/requires-newio-kernel.txt')
 requires.append(f'newio=={version}')
 
 setup(

@@ -114,12 +114,12 @@ class MonitorShell:
 
 def main():
     if len(sys.argv) > 2:
-        print("Usage: python -m newio_kernel.monitor <HOST:PORT>")
+        print('Usage: python -m newio_kernel.monitor <HOST:PORT>')
         return
     if len(sys.argv) == 2:
         host_port = sys.argv[1]
         if host_port in ['-h', '--help']:
-            print("Usage: python -m newio_kernel.monitor <HOST:PORT>")
+            print('Usage: python -m newio_kernel.monitor <HOST:PORT>')
             return
         try:
             host, port = host_port.split(':')

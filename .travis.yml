@@ -1,0 +1,15 @@
+language: python
+
+python:
+  - "3.6"
+  - "nightly"
+
+install:
+  - ./bootstrap.sh
+
+script:
+  - pre-commit run --all-files
+  - pytest --cov newio --cov newio_kernel
+
+after_success:
+  - codecov
