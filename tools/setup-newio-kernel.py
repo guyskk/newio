@@ -19,13 +19,8 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3.6',
     ],
-    packages=[
-        '_newio',
-        'newio_kernel',
-    ],
-    package_data={
-        '_newio': ['version.txt']
-    },
+    packages=_newio.find_packages('newio-kernel'),
+    package_data=_newio.package_data,
     python_requires='>=3.6',
     install_requires=requires,
 )

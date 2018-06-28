@@ -2,7 +2,6 @@ import _newio
 from setuptools import setup
 
 version = _newio.__version__
-requires = _newio.parse_requires('tools/requires-newio.txt')
 
 setup(
     name='newio',
@@ -18,15 +17,10 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Programming Language :: Python :: 3.6',
     ],
-    packages=[
-        '_newio',
-        'newio',
-    ],
-    package_data={
-        '_newio': ['version.txt']
-    },
+    packages=_newio.find_packages('newio'),
+    package_data=_newio.package_data,
     python_requires='>=3.6',
-    install_requires=requires,
+    install_requires=[],
     extras_require={
         'kernel': [f'newio-kernel=={version}'],
     },
