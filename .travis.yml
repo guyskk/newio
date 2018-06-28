@@ -10,6 +10,11 @@ install:
 script:
   - pre-commit run --all-files
   - pytest --cov newio --cov newio_kernel
+  # test install
+  - cd $TRAVIS_BUILD_DIR
+  - inv build
+  - pip install --ignore-installed dist/*
+  - cd /tmp && pytest $TRAVIS_BUILD_DIR/tests
 
 after_success:
   - codecov
