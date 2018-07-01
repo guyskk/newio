@@ -1,6 +1,7 @@
 import socket
 import json
 import logging
+from select import select
 from threading import Thread
 from concurrent.futures import Future
 
@@ -32,33 +33,45 @@ class MonitorServer:
         self._channel = ThreadChannel()
         self._agent = None
         self._server = Thread(target=self.monitor_server, daemon=True)
-        self._stoped = False
+        self._stopped = False
+        self._sock_request_stop, self._sock_stop = socket.socketpair()
 
     async def start(self):
-        LOG.debug('Monitor server starting')
+        LOG.debug('[starting] monitor')
         await self._channel.__aenter__()
         self._agent = await spawn(self.monitor_agent())
         self._server.start()
+        LOG.debug('[started] monitor')
 
     async def stop(self):
-        LOG.debug('Monitor server stopping')
-        self._stoped = True
+        LOG.debug('[stopping] monitor')
+        self._stopped = True
+        self._sock_request_stop.send(b'x')
+        self._sock_request_stop.close()
         if self._channel is not None:
             await self._channel.__aexit__()
         if self._agent is not None:
             await self._agent.join()
+        LOG.debug('[stopped] monitor')
+
+    def _check_stop(self, sock):
+        readables, _, _ = select([sock, self._sock_stop], [], [])
+        stop = self._stopped or not readables or self._sock_stop in readables
+        if stop:
+            self._sock_stop.close()
+        return stop
 
     def monitor_server(self):
+        LOG.debug('[running] monitor server')
         server = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.settimeout(0.2)
         server.bind((self.host, self.port))
         server.listen(1)
         host, port = server.getsockname()
-        print(f'Monitor server listening at tcp://{host}:{port}')
+        print(f'* Monitor server listening at tcp://{host}:{port}')
         with server:
             while True:
-                if self._stoped:
+                if self._check_stop(server):
                     break
                 try:
                     client, address = server.accept()
@@ -70,13 +83,16 @@ class MonitorServer:
                     except Exception:
                         msg = f'Connection #{client.fileno()} crashed:'
                         LOG.warn(msg, exc_info=True)
-        LOG.info('Monitor server stoped')
+            LOG.debug('[stopping] monitor server')
+        LOG.debug('[stopped] monitor server')
 
     def client_handler(self, client, address):
         host, port = address
         LOG.info(f'Accept connection #{client.fileno()} from {host}:{port}')
         buffer = b''
         while True:
+            if self._check_stop(client):
+                break
             data = client.recv(1024)
             if not data:
                 break
@@ -109,10 +125,14 @@ class MonitorServer:
         result, error = response.result()
         response = json.dumps([result, error], ensure_ascii=False).strip()
         response_bytes = response.encode('utf-8') + b'\n'
-        LOG.debug('Send response: %s', response)
+        if error:
+            LOG.debug('Send error response')
+        else:
+            LOG.debug('Send success response')
         client.sendall(response_bytes)
 
     async def monitor_agent(self):
+        LOG.debug('[running] monitor server agent')
         async for response, command, args, kwargs in self._channel:
             result = error = None
             try:
@@ -123,3 +143,5 @@ class MonitorServer:
                 LOG.error('execute command failed:', exc_info=True)
                 error = 'execute command failed: ' + str(ex)
             response.set_result((result, error))
+        LOG.debug('[stopping] monitor server agent')
+        LOG.debug('[stopped] monitor server agent')

@@ -61,10 +61,17 @@ class AsyncioExecutor:
         self._notify, self._wakeup = socketpair()
         self._notify.setblocking(False)
         self._wakeup.setblocking(False)
+        self._worker = None
+
+    def _start_worker(self):
+        LOG.debug('[starting] asyncio executor')
         self._worker = Thread(target=self.asyncio_worker)
         self._worker.start()
+        LOG.debug('[started] asyncio executor')
 
     def submit(self, coro):
+        if self._worker is None:
+            self._start_worker()
         response = Future()
         fut = AsyncioExecutorFuture(response)
         self._request.put_nowait((coro, response))
@@ -72,20 +79,25 @@ class AsyncioExecutor:
         return fut
 
     def shutdown(self, wait=True):
+        LOG.debug('[stopping] asyncio executor')
         self._notify.sendall(b'x')
         self._notify.close()
-        if wait:
+        if wait and self._worker is not None:
             self._worker.join()
+        LOG.debug('[stopped] asyncio executor')
 
     def asyncio_worker(self):
-        LOG.debug('asyncio executor worker starting')
+        LOG.debug('[running] asyncio executor loop')
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.create_task(self._asyncio_worker())
         loop.run_forever()
+        LOG.debug('[stopping] asyncio executor loop')
         loop.close()
+        LOG.debug('[stopped] asyncio executor loop')
 
     async def _asyncio_worker(self):
+        LOG.debug('[running] asyncio executor worker')
         loop = asyncio.get_event_loop()
         is_exiting = False
         while True:
@@ -98,8 +110,9 @@ class AsyncioExecutor:
                     break
                 nbytes = await loop.sock_recv(self._wakeup, 128)
                 if not nbytes or b'x' in nbytes:
-                    LOG.debug('asyncio executor worker exiting')
+                    LOG.debug('[stopping] asyncio executor worker')
                     is_exiting = True
             else:
                 LOG.debug('asyncio executor worker execute %r', coro)
                 response.set_result(loop.create_task(coro))
+        LOG.debug('[stopped] asyncio executor worker')

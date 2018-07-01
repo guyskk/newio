@@ -80,6 +80,7 @@ class Executor:
         return ExecutorFuture(self.handler, task, fut)
 
     async def executor_agent(self):
+        LOG.debug('[running] executor agent')
         is_exiting = False
         while True:
             try:
@@ -89,22 +90,27 @@ class Executor:
                     break
                 nbytes = await self._wakeup.recv(128)
                 if not nbytes or b'x' in nbytes:
-                    LOG.debug('executor agent exiting')
+                    LOG.debug('[stopping] executor agent')
                     is_exiting = True
                     await self._wakeup.close()
             else:
                 self._handler(task, result, error)
+        LOG.debug('[stopped] executor agent')
 
     async def start(self):
+        LOG.debug('[starting] executor')
         self.agent_task = await spawn(self.executor_agent())
+        LOG.debug('[started] executor')
 
     async def stop(self):
-        LOG.debug('executor exiting')
+        LOG.debug('[stopping] executor')
         self._is_exiting = True
         with self._notify_lock:
             await self._notify.sendall(b'x')
             await self._notify.close()
         await self.agent_task.join()
+        self.shutdown()
+        LOG.debug('[stopped] executor')
 
     def shutdown(self, wait=True):
         self._thread_executor.shutdown(wait=wait)

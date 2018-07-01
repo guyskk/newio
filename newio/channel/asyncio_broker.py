@@ -67,12 +67,14 @@ class AsyncioBroker:
         await run_in_asyncio(_notify_all())
 
     async def start(self):
+        LOG.debug('[starting] channel asyncio broker')
         await self._init_cond()
         self._consumer_broker_task = await spawn(self._consumer_broker())
         self._producer_broker_task = await spawn(self._producer_broker())
+        LOG.debug('[started] channel asyncio broker')
 
     async def shutdown(self, wait=True):
-        LOG.debug('broker exiting')
+        LOG.debug('[stopping] channel asyncio broker')
         self._is_closed = True
         with self._notify_lock:
             self._notify_send.sendall(b'x')
@@ -85,6 +87,7 @@ class AsyncioBroker:
             await self._producer_broker_task.join()
             self._wakeup_send.close()
             self._wakeup_recv.close()
+        LOG.debug('[stopped] channel asyncio broker')
 
     def notify_send(self):
         if self._is_closed:
@@ -128,27 +131,29 @@ class AsyncioBroker:
     async def _consumer_broker(self):
 
         async def _broker():
-            LOG.debug('consumer broker started')
+            LOG.debug('[running] channel asyncio broker consumer')
             loop = asyncio.get_event_loop()
             while True:
                 nbytes = await loop.sock_recv(self._wakeup_recv, 1)
-                if not nbytes or nbytes == b'x':
-                    LOG.debug('consumer broker exiting')
-                    break
                 await cond_notify(self._recv_cond)
+                if not nbytes or nbytes == b'x':
+                    LOG.debug('[stopping] channel asyncio broker consumer')
+                    break
+            LOG.debug('[stopped] channel asyncio broker consumer')
 
         await run_in_asyncio(_broker())
 
     async def _producer_broker(self):
 
         async def _broker():
-            LOG.debug('producer broker started')
+            LOG.debug('[running] channel asyncio broker producer')
             loop = asyncio.get_event_loop()
             while True:
                 nbytes = await loop.sock_recv(self._wakeup_send, 1)
-                if not nbytes or nbytes == b'x':
-                    LOG.debug('producer broker exiting')
-                    break
                 await cond_notify(self._send_cond)
+                if not nbytes or nbytes == b'x':
+                    LOG.debug('[stopping] channel asyncio broker producer')
+                    break
+            LOG.debug('[stopped] channel asyncio broker producer')
 
         await run_in_asyncio(_broker())

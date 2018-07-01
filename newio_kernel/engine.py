@@ -21,12 +21,7 @@ class Command:
 
     @staticmethod
     def cancel(task):
-        # task may await in finally block, try best effort to unwind stack
-        for _ in range(1000):
-            task.throw(TaskCanceled())
-        message = f'failed to cancel task {task!r}, it may leak resources'
-        LOG.error(message + ':\n' + task.format_stack())
-        raise RuntimeError(message)
+        return task.throw(TaskCanceled())
 
 
 class Engine:
@@ -54,10 +49,18 @@ class Engine:
         else:
             self._syscall_handler(task, call, *args)
 
+    def cancel(self, task):
+        self.execute(task, Command.cancel)
+
     def force_cancel(self, task):
         '''cancel a task, ignore any exception here'''
         try:
-            Command.cancel(task)
+            # task may await in finally block, try best effort to unwind stack
+            for _ in range(1000):
+                Command.cancel(task)
+            message = f'failed to cancel task {task!r}, it may leak resources'
+            LOG.error(message + ':\n' + task.format_stack())
+            raise RuntimeError(message)
         except StopIteration as stoped:
             task.stop(result=stoped.value)
         except BaseException as ex:

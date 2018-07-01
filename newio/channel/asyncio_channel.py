@@ -23,14 +23,18 @@ class AsyncioChannel:
     async def __aenter__(self):
         if self._is_closed:
             raise RuntimeError('Channel already closed')
+        LOG.debug('[starting] asyncio channel')
         await self._asyncio_broker.start()
         await self._newio_broker.start()
+        LOG.debug('[started] asyncio channel')
         return self
 
     async def __aexit__(self, *exc_info):
+        LOG.debug('[stopping] asyncio channel')
         self._is_closed = True
         await self._asyncio_broker.shutdown()
         await self._newio_broker.shutdown()
+        LOG.debug('[stopped] asyncio channel')
 
     async def __aiter__(self):
         while True:

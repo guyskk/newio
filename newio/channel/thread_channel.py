@@ -23,14 +23,18 @@ class ThreadChannel:
     async def __aenter__(self):
         if self._is_closed:
             raise RuntimeError('Channel already closed')
+        LOG.debug('[starting] thread channel')
         await self._thread_broker.start()
         await self._newio_broker.start()
+        LOG.debug('[started] thread channel')
         return self
 
     async def __aexit__(self, *exc_info):
+        LOG.debug('[stopping] thread channel')
         self._is_closed = True
         await self._thread_broker.shutdown()
         await self._newio_broker.shutdown()
+        LOG.debug('[stopped] thread channel')
 
     async def __aiter__(self):
         while True:

@@ -150,8 +150,6 @@ class Kernel:
         except BaseException:
             self.shutdown()
             raise
-        else:
-            self.close()
         if self.main_task.error:
             raise self.main_task.error
         return self.main_task.result
@@ -165,23 +163,19 @@ class Kernel:
             return await coro
         finally:
             # when main task exiting, normally cancel all subtasks
-            LOG.debug('cancel all tasks, len(tasks)=%d', len(self.tasks))
+            LOG.debug('cancel all %d tasks', len(self.tasks))
             tasks = set(self.tasks) - self.kernel_tasks
             for task in tasks:
                 user_task = task._nio_ref_
                 if user_task.is_alive:
                     await user_task.cancel()
                 await user_task.join()
-            if self.monitor_server:
+            if self.monitor_server is not None:
                 await self.monitor_server.stop()
             await self.executor.stop()
             if len(self.tasks) > 1:
                 LOG.error('Unfinished tasks: %r', self.tasks)
-
-    def close(self, wait=True):
-        '''normal exit'''
-        self.selector.close()
-        self.executor.shutdown(wait=wait)
+            self.selector.close()
 
     def shutdown(self):
         '''force exit'''
@@ -190,7 +184,8 @@ class Kernel:
             task = self.tasks.last.value
             if task.is_alive:
                 self.engine.force_cancel(task)
-        self.close(wait=False)
+        self.executor.shutdown(wait=False)
+        self.selector.close()
 
     def _run(self):
         while self.tasks:
@@ -229,6 +224,7 @@ class Kernel:
         # cleanup
         task.clean_waiting()
         for wakeup_task in task.stop_lounge.wake_all():
+            wakeup_task.clean_waiting()
             self.engine.schedule(wakeup_task, Command.send)
         # unregister
         self.tasks.remove(task.node)
@@ -236,11 +232,11 @@ class Kernel:
     def _executor_handler(self, task, result, error):
         if task.is_alive:
             LOG.debug('task %r wakeup by executor', task)
+            task.clean_waiting()
             if error is None:
                 self.engine.execute(task, Command.send, result)
             else:
                 self.engine.execute(task, Command.throw, error)
-            task.clean_waiting()
 
     def _timer_action_wakeup(self, timer, task):
         LOG.debug('task %r wakeup by timer %r', task, timer)
@@ -251,11 +247,13 @@ class Kernel:
     def _timer_action_timeout(self, timer, task):
         LOG.debug('task %r timeout by timer %r', task, timer)
         if task.is_alive:
+            task.clean_waiting()
             self.engine.execute(task, Command.timeout, timer._nio_ref_)
 
     def _timer_action_cancel(self, timer, task):
         LOG.debug('task %r cancel by timer %r', task, timer)
         if task.is_alive:
+            task.clean_waiting()
             self.engine.execute(task, Command.cancel)
 
     def syscall_handler(self, current, call, *args):

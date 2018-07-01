@@ -16,7 +16,6 @@ class ThreadBroker:
         '''do nothing'''
 
     async def shutdown(self, wait=True):
-        LOG.debug('broker exiting')
         self._is_closed = True
 
     def notify_send(self):

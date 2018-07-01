@@ -63,5 +63,5 @@ class KernelApi:
         task = self._get_task_by_ident(ident)
         if not task.is_alive:
             raise KernelApiError(f'task #{ident} not alive')
-        self.kernel.engine.force_cancel(task)
+        self.kernel.engine.cancel(task)
         return self._format_task(task, with_stack=True)

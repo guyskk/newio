@@ -23,11 +23,13 @@ class NewioBroker:
         self._producer_broker_task = None
 
     async def start(self):
+        LOG.debug('[starting] channel newio broker')
         self._consumer_broker_task = await spawn(self._consumer_broker())
         self._producer_broker_task = await spawn(self._producer_broker())
+        LOG.debug('[started] channel newio broker')
 
     async def shutdown(self, wait=True):
-        LOG.debug('broker exiting')
+        LOG.debug('[stopping] channel newio broker')
         self._is_closed = True
         with self._notify_lock:
             self._notify_send.socket.sendall(b'x')
@@ -41,6 +43,7 @@ class NewioBroker:
             await self._producer_broker_task.join()
             await self._wakeup_send.close()
             await self._wakeup_recv.close()
+        LOG.debug('[stopped] channel newio broker')
 
     def notify_send(self):
         if self._is_closed:
@@ -82,19 +85,21 @@ class NewioBroker:
         return item
 
     async def _consumer_broker(self):
-        LOG.debug('consumer broker started')
+        LOG.debug('[running] channel newio broker consumer')
         while True:
             nbytes = await self._wakeup_recv.recv(1)
-            if not nbytes or nbytes == b'x':
-                LOG.debug('consumer broker exiting')
-                break
             await self._recv_cond.notify()
+            if not nbytes or nbytes == b'x':
+                LOG.debug('[stopping] channel newio broker consumer')
+                break
+        LOG.debug('[stopped] channel newio broker consumer')
 
     async def _producer_broker(self):
-        LOG.debug('producer broker started')
+        LOG.debug('[running] channel newio broker producer')
         while True:
             nbytes = await self._wakeup_send.recv(1)
-            if not nbytes or nbytes == b'x':
-                LOG.debug('producer broker exiting')
-                break
             await self._send_cond.notify()
+            if not nbytes or nbytes == b'x':
+                LOG.debug('[stopping] channel newio broker producer')
+                break
+        LOG.debug('[stopped] channel newio broker producer')
