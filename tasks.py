@@ -66,6 +66,8 @@ def version(ctx, bump='+'):
     else:
         sys.exit(f'Unknown version bump {bump!r}, choices: +, ++, +++')
     version = f'{major}.{minor}.{patch}'
-    print(f'bump version {origin} -> {version}')
+    msg = f'Bump version: {origin} -> {version}'
+    print(msg)
     with open('_newio/version.txt', 'w') as f:
         f.write(version + '\n')
+    ctx.run(f"git commit -a -m '{msg}'")
