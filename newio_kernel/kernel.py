@@ -193,6 +193,7 @@ class Kernel:
             self.engine.run()
             if not self.tasks:
                 break
+            self.selector.flush()
             time_poll = self.timer_queue.next_check_interval()
             for task in self.selector.poll(time_poll):
                 self.engine.execute(task, Command.send)
@@ -257,6 +258,7 @@ class Kernel:
             self.engine.execute(task, Command.cancel)
 
     def syscall_handler(self, current, call, *args):
+        current.clean_waiting()
         handler = getattr(self, call.__name__, None)
         if handler is None:
             raise RuntimeError('unknown syscall {}'.format(call.__name__))
@@ -265,7 +267,6 @@ class Kernel:
     def nio_sleep(self, current, seconds):
         timer = self.timer_queue.start_timer(
             seconds, self._timer_action_wakeup, (current,))
-        current.clean_waiting()
         current.waiting = timer
 
     def nio_timeout_after(self, current, seconds):
@@ -310,7 +311,6 @@ class Kernel:
     def nio_lounge_wait(self, current, user_lounge):
         lounge = KernelLounge.of(user_lounge)
         waiter = lounge.add_waiter(current)
-        current.clean_waiting()
         current.waiting = waiter
 
     def nio_lounge_wake(self, current, user_lounge, n):
@@ -334,15 +334,12 @@ class Kernel:
 
     def nio_run_in_thread(self, current, fn, args, kwargs):
         fut = self.executor.run_in_thread(current, fn, args, kwargs)
-        current.clean_waiting()
         current.waiting = fut
 
     def nio_run_in_process(self, current, fn, args, kwargs):
         fut = self.executor.run_in_process(current, fn, args, kwargs)
-        current.clean_waiting()
         current.waiting = fut
 
     def nio_run_in_asyncio(self, current, coro):
         fut = self.executor.run_in_asyncio(current, coro)
-        current.clean_waiting()
         current.waiting = fut
