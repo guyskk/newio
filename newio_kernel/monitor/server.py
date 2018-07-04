@@ -1,6 +1,7 @@
 import socket
 import json
 import logging
+import errno
 from select import select
 from threading import Thread
 from concurrent.futures import Future
@@ -65,10 +66,15 @@ class MonitorServer:
         LOG.debug('[running] monitor server')
         server = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((self.host, self.port))
+        try:
+            server.bind((self.host, self.port))
+        except OSError as ex:
+            if ex.errno != errno.EADDRINUSE:
+                raise
+            server.bind((self.host, 0))  # bind random port
         server.listen(1)
-        host, port = server.getsockname()
-        print(f'* Monitor server listening at tcp://{host}:{port}')
+        self.host, self.port = server.getsockname()
+        print(f'* Monitor server listening at tcp://{self.host}:{self.port}')
         with server:
             while True:
                 if self._check_stop(server):
