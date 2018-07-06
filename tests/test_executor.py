@@ -31,8 +31,8 @@ async def test_executor(sleep_task):
 @pytest.mark.parametrize('sleep_task', [process_sleep_task])
 @run_it
 async def test_process_executor(sleep_task):
-    cpus = cpu_count()
-    cost = await run_sleep_task(sleep_task, seconds=0.2, num_tasks=cpus)
+    num_tasks = min(3, cpu_count())
+    cost = await run_sleep_task(sleep_task, seconds=0.2, num_tasks=num_tasks)
     assert 0.2 <= cost < 0.3
 
 

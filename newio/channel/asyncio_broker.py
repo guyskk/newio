@@ -75,7 +75,7 @@ class AsyncioBroker:
     async def join(self):
         await run_in_asyncio(self._asyncio_join())
 
-    async def _stop_receiver_broker(self, loop):
+    async def _stop_receiver_broker(self):
         await cond_notify_all(self._recv_cond)
         self._receiver_stopped.set()
         LOG.debug('[stopped] channel asyncio receiver broker')
@@ -89,13 +89,13 @@ class AsyncioBroker:
             if self.controller.closed:
                 LOG.debug('[stopping] channel asyncio receiver broker')
                 loop.remove_reader(fd)
-                loop.create_task(self._stop_receiver_broker(loop))
+                loop.create_task(self._stop_receiver_broker())
             else:
                 loop.create_task(cond_notify(self._recv_cond))
 
         loop.add_reader(fd, callback)
 
-    async def _stop_sender_broker(self, loop):
+    async def _stop_sender_broker(self):
         await cond_notify_all(self._send_cond)
         self._sender_stopped.set()
         LOG.debug('[stopped] channel asyncio sender broker')
@@ -109,7 +109,7 @@ class AsyncioBroker:
             if self.controller.closed:
                 LOG.debug('[stopping] channel asyncio sender broker')
                 loop.remove_reader(fd)
-                loop.create_task(self._stop_sender_broker(loop))
+                loop.create_task(self._stop_sender_broker())
             else:
                 loop.create_task(cond_notify(self._send_cond))
 
