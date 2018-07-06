@@ -10,7 +10,6 @@ async def thread_producer(channel):
     def _producer():
         for _ in range(10):
             channel.thread_send(1)
-        channel.close()
 
     return await run_in_thread(_producer)
 
@@ -29,7 +28,6 @@ async def asyncio_producer(channel):
     async def _producer():
         for _ in range(10):
             await channel.asyncio_send(1)
-        channel.close()
 
     return await run_in_asyncio(_producer())
 
@@ -47,7 +45,6 @@ async def asyncio_consumer(channel):
 async def newio_producer(channel):
     for _ in range(10):
         await channel.send(1)
-    channel.close()
 
 
 async def newio_consumer(channel):
@@ -62,14 +59,48 @@ consumers = [thread_consumer, newio_consumer, asyncio_consumer]
 
 
 @pytest.mark.parametrize('producer', producers)
+@pytest.mark.parametrize('num_producer', [1, 10])
 @pytest.mark.parametrize('consumer', consumers)
+@pytest.mark.parametrize('num_consumer', [1, 10])
 @run_it
-async def test_channel(producer, consumer):
+async def test_channel(producer, num_producer, consumer, num_consumer):
+    producers = []
+    consumers = []
     async with Channel() as channel:
-        producer_task = await spawn(producer(channel))
-        consumer_task = await spawn(consumer(channel))
-        await producer_task.join()
-        await consumer_task.join()
-    assert not producer_task.error
-    assert not consumer_task.error
-    assert consumer_task.result == 10
+        for _ in range(num_producer):
+            producers.append(await spawn(producer(channel)))
+        for _ in range(num_consumer):
+            consumers.append(await spawn(consumer(channel)))
+        for task in producers:
+            await task.join()
+            assert not task.error
+        channel.close()
+        for task in consumers:
+            await task.join()
+            assert not task.error
+    total = sum([t.result for t in consumers])
+    assert total == len(producers) * 10
+
+
+@pytest.mark.parametrize('num_producer', [1, 10])
+@pytest.mark.parametrize('num_consumer', [1, 10])
+@run_it
+async def test_mix_channel(num_producer, num_consumer):
+    producers = []
+    consumers = []
+    async with Channel() as channel:
+        for _ in range(num_producer):
+            for producer in producers:
+                producers.append(await spawn(producer(channel)))
+        for _ in range(num_consumer):
+            for consumer in consumers:
+                consumers.append(await spawn(consumer(channel)))
+        for task in producers:
+            await task.join()
+            assert not task.error
+        channel.close()
+        for task in consumers:
+            await task.join()
+            assert not task.error
+    total = sum([t.result for t in consumers])
+    assert total == len(producers) * 10
