@@ -7,7 +7,7 @@ from threading import Thread
 from concurrent.futures import Future
 
 from newio import spawn
-from newio.channel import ThreadChannel
+from newio.channel import Channel
 from newio_kernel.kernel_api import KernelApiError
 
 LOG = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class MonitorServer:
         self.kernel_api = kernel_api
         self.host = host
         self.port = port
-        self._channel = ThreadChannel()
+        self._channel = Channel()
         self._agent = None
         self._server = Thread(target=self.monitor_server, daemon=True)
         self._stopped = False

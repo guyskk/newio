@@ -1,5 +1,4 @@
 from .error import ChannelClosed
-from .asyncio_channel import AsyncioChannel
-from .thread_channel import ThreadChannel
+from .channel import Channel
 
-__all__ = ('ThreadChannel', 'AsyncioChannel', 'ChannelClosed')
+__all__ = ('Channel', 'ChannelClosed')

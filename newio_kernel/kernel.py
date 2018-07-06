@@ -214,9 +214,9 @@ class Kernel:
     def stop_task(self, task, *, result=None, error=None):
         if error:
             if isinstance(error, TaskCanceled):
-                LOG.debug('task %r canceled', task)
+                LOG.info('task %r canceled', task)
             else:
-                LOG.info('task %r crashed:', task, exc_info=error)
+                LOG.warning('task %r crashed:', task, exc_info=error)
         else:
             LOG.debug('stop task %s', task)
         task.is_alive = False
