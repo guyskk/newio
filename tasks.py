@@ -9,15 +9,22 @@ from invoke import task
 import _newio
 from newio_kernel import run
 from tests.echo_server import start_echo_server
+from benchmark import benchmark_channel
 
-LOG_FMT = '%(asctime)s %(levelname)s [%(process)d]%(name)s: %(message)s'
+
+LOG_FMT = ('%(levelname)1.1s %(asctime)s P%(process)-5s '
+           '%(name)s:%(lineno)-4d %(message)s')
+
+
+def init_logging(debug=False):
+    if debug:
+        coloredlogs.install(level=logging.DEBUG, fmt=LOG_FMT)
 
 
 @task
 def echo_server(ctx, host='127.0.0.1', port=25000, debug=False):
     """start echo server"""
-    if debug:
-        coloredlogs.install(level=logging.DEBUG, fmt=LOG_FMT)
+    init_logging(debug)
     run(start_echo_server(host, port))
 
 
@@ -71,3 +78,9 @@ def version(ctx, bump='+'):
     with open('_newio/version.txt', 'w') as f:
         f.write(version + '\n')
     ctx.run(f"git commit -a -m '{msg}'")
+
+
+@task
+def benchmark(ctx, producer='', consumer='', debug=False):
+    init_logging(debug)
+    benchmark_channel.benchmark(producer, consumer)

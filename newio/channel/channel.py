@@ -13,8 +13,8 @@ LOG = logging.getLogger(__name__)
 class Channel:
     """Message channel for communicating between threads/newio/asyncio"""
 
-    def __init__(self, maxsize=0):
-        self.controller = ChannelController()
+    def __init__(self, bufsize=None):
+        self.controller = ChannelController(bufsize)
         self._thread_broker = ThreadBroker(self.controller)
         self._newio_broker = NewioBroker(self.controller)
         self._asyncio_broker = AsyncioBroker(self.controller)

@@ -3,6 +3,7 @@ import time
 from itertools import product
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
+
 from newio import run_in_asyncio, run_in_thread, spawn
 from newio.channel import Channel
 from newio_kernel import run
@@ -134,30 +135,62 @@ def sout(text):
     sys.stdout.flush()
 
 
-def print_title(p, pn, c, cn):
-    title = f'{p:>16} {pn:>1d} : {cn:>1d} {c:>16}'
-    sout(f'{title:>40}')
+class Printer:
+    def __init__(self):
+        self.titles = []
+        self.results = []
+
+    def format_title(self, p, pn, c, cn):
+        title = f'{p:>16} {pn:>1d} : {cn:>1d} {c:>16}'
+        return f'{title:>40}'
+
+    def print_title(self, p, pn, c, cn):
+        self.titles.append((p, pn, c, cn))
+        sout(self.format_title(p, pn, c, cn))
+
+    def format_result(self, result):
+        t_total = sum(result)
+        qps = '{:>7d}'.format(int(NUM_ITEMS / t_total))
+        t_setup, t_producer, t_consumer = [f'{x:.3f}' for x in result]
+        t = f'{t_setup} + {t_producer} + {t_consumer}'
+        return (f' => {t} = {t_total:.3f}  {qps} QPS')
+
+    def print_result(self, result):
+        self.results.append(result)
+        sout(self.format_result(result) + '\n')
+
+    def _sort_key(self, title_result):
+        _, result = title_result
+        return sum(result)
+
+    def print_sorted(self):
+        print('-' * 80)
+        items = sorted(zip(self.titles, self.results), key=self._sort_key)
+        for title, result in items:
+            sout(self.format_title(*title))
+            sout(self.format_result(result) + '\n')
 
 
-def print_result(result):
-    t_total = sum(result)
-    qps = '{:>7d}'.format(int(NUM_ITEMS / t_total))
-    t_setup, t_producer, t_consumer = [f'{x:.3f}' for x in result]
-    sout(f' => {t_setup} + {t_producer} + {t_consumer} = {t_total:.3f}  {qps} QPS\n')
-
-
-def benchmark():
+def benchmark(p_name='', c_name=''):
+    printer = Printer()
     for num_producer, num_consumer in product([1, 9], [1, 9]):
-        print_title('queue_producer', num_producer, 'queue_consumer', num_consumer)
+        if p_name not in 'queue_producer' or c_name not in 'queue_consumer':
+            continue
+        printer.print_title(
+            'queue_producer', num_producer,
+            'queue_consumer', num_consumer)
         result = benchmark_queue(num_producer, num_consumer)
-        print_result(result)
+        printer.print_result(result)
     for producer, num_producer, consumer, num_consumer in product(
         producers, [1, 9], consumers, [1, 9]
     ):
-        print_title(producer.__name__, num_producer, consumer.__name__, num_consumer)
-        result = run(benchmark_channel(producer, num_producer, consumer, num_consumer))
-        print_result(result)
-
-
-if __name__ == '__main__':
-    benchmark()
+        if p_name not in producer.__name__ or c_name not in consumer.__name__:
+            continue
+        printer.print_title(
+            producer.__name__, num_producer,
+            consumer.__name__, num_consumer)
+        result = run(benchmark_channel(
+            producer, num_producer,
+            consumer, num_consumer))
+        printer.print_result(result)
+    printer.print_sorted()

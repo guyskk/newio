@@ -1,15 +1,22 @@
 from socket import socketpair
 from threading import Lock
+from collections import deque
 
 from .error import ChannelClosed
 
-_EMPTY = object()
+MAX_BUFSIZE = 2 ** 32
+DEFAULT_BUF_SIZE = 128
 
 
 class ChannelController:
-    def __init__(self):
+    def __init__(self, bufsize=DEFAULT_BUF_SIZE):
+        if not bufsize or bufsize <= 0:
+            bufsize = DEFAULT_BUF_SIZE
+        if bufsize > MAX_BUFSIZE:
+            raise ValueError('bufsize too large')
+        self.bufsize = bufsize
         self._lock = Lock()
-        self._item = _EMPTY
+        self._queue = deque()
         self._closed = False
         self._s1, self._s2 = socketpair()
         self._s1.setblocking(False)
@@ -18,29 +25,30 @@ class ChannelController:
         self._sock_notify_receiver = self._sock_sender_wait = self._s2
         self.receiver_wait_fd = self._sock_receiver_wait.fileno()
         self.sender_wait_fd = self._sock_sender_wait.fileno()
-        self._sock_notify_sender.send(b'1')
+        # If bufsize very large, the real socket SO_SNDBUF and SO_RCVBUF
+        # may not enough, this may cause BlockingIOError on send.
+        self._sock_notify_sender.send(b'1' * self.bufsize)
 
     def try_recv(self):
         with self._lock:
-            if self._item is _EMPTY:
+            if len(self._queue) <= 0:
                 if self._closed:
                     raise ChannelClosed()
                 return False, None
-            self._sock_receiver_wait.recv(1)
-            item = self._item
-            self._item = _EMPTY
             self._sock_notify_sender.send(b'1')
+            self._sock_receiver_wait.recv(1)
+            item = self._queue.popleft()
             return True, item
 
     def try_send(self, item):
         with self._lock:
             if self._closed:
                 raise ChannelClosed()
-            if self._item is not _EMPTY:
+            if len(self._queue) >= self.bufsize:
                 return False
-            self._sock_sender_wait.recv(1)
-            self._item = item
             self._sock_notify_receiver.send(b'1')
+            self._sock_sender_wait.recv(1)
+            self._queue.append(item)
             return True
 
     def close(self):
