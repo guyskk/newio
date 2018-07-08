@@ -68,8 +68,11 @@ def version(ctx, bump='+'):
         patch += 1
     elif bump == '++':
         minor += 1
+        patch = 0
     elif bump == '+++':
         major += 1
+        minor = 0
+        patch = 0
     else:
         sys.exit(f'Unknown version bump {bump!r}, choices: +, ++, +++')
     version = f'{major}.{minor}.{patch}'
@@ -78,6 +81,7 @@ def version(ctx, bump='+'):
     with open('_newio/version.txt', 'w') as f:
         f.write(version + '\n')
     ctx.run(f"git commit -a -m '{msg}'")
+    ctx.run(f'git tag {version}')
 
 
 @task
