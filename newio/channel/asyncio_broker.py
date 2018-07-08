@@ -91,7 +91,7 @@ class AsyncioBroker:
                 loop.remove_reader(fd)
                 loop.create_task(self._stop_receiver_broker())
             else:
-                loop.create_task(cond_notify(self._recv_cond))
+                loop.create_task(cond_notify_all(self._recv_cond))
 
         loop.add_reader(fd, callback)
 
@@ -111,7 +111,7 @@ class AsyncioBroker:
                 loop.remove_reader(fd)
                 loop.create_task(self._stop_sender_broker())
             else:
-                loop.create_task(cond_notify(self._send_cond))
+                loop.create_task(cond_notify_all(self._send_cond))
 
         loop.add_reader(fd, callback)
 

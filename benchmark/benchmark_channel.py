@@ -114,12 +114,12 @@ async def benchmark_channel(producer, num_producer, consumer, num_consumer):
         t1 = time.monotonic()
         for task in producers:
             await task.join()
-            assert not task.error
+            assert not task.error, task.error
         channel.close()
         t2 = time.monotonic()
         for task in consumers:
             await task.join()
-            assert not task.error
+            assert not task.error, task.error
     total = sum([t.result for t in consumers])
     assert total == len(producers) * NUM_ITEMS
     t3 = time.monotonic()
@@ -171,9 +171,9 @@ class Printer:
             sout(self.format_result(result) + '\n')
 
 
-def benchmark(p_name='', c_name=''):
+def benchmark(p_name='', p_n=(1, 9), c_name='', c_n=(1, 9)):
     printer = Printer()
-    for num_producer, num_consumer in product([1, 9], [1, 9]):
+    for num_producer, num_consumer in product(p_n, c_n):
         if p_name not in 'queue_producer' or c_name not in 'queue_consumer':
             continue
         printer.print_title(
@@ -182,7 +182,7 @@ def benchmark(p_name='', c_name=''):
         result = benchmark_queue(num_producer, num_consumer)
         printer.print_result(result)
     for producer, num_producer, consumer, num_consumer in product(
-        producers, [1, 9], consumers, [1, 9]
+        producers, p_n, consumers, c_n
     ):
         if p_name not in producer.__name__ or c_name not in consumer.__name__:
             continue

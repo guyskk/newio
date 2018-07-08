@@ -1,4 +1,4 @@
-from socket import socketpair
+import socket
 from threading import Lock
 from collections import deque
 
@@ -18,25 +18,55 @@ class ChannelController:
         self._lock = Lock()
         self._queue = deque()
         self._closed = False
-        self._s1, self._s2 = socketpair()
-        self._s1.setblocking(False)
-        self._s2.setblocking(False)
-        self._sock_notify_sender = self._sock_receiver_wait = self._s1
-        self._sock_notify_receiver = self._sock_sender_wait = self._s2
-        self.receiver_wait_fd = self._sock_receiver_wait.fileno()
-        self.sender_wait_fd = self._sock_sender_wait.fileno()
-        # If bufsize very large, the real socket SO_SNDBUF and SO_RCVBUF
-        # may not enough, this may cause BlockingIOError on send.
-        self._sock_notify_sender.send(b'1' * self.bufsize)
+        self._s1, self._s2 = socket.socketpair()
+        for sock in [self._s1, self._s2]:
+            sock.setblocking(False)
+        self._sendable = False
+        self._recvable = False
+        self._sock_set_senable = self._sock_unset_recvable = self._s1
+        self._sock_unset_sendable = self._sock_set_recvable = self._s2
+        self.receiver_wait_fd = self._s1.fileno()
+        self.sender_wait_fd = self._s2.fileno()
+        self._set_sendable()
+
+    def _set_sendable(self):
+        if self._sendable:
+            return
+        self._sendable = True
+        self._sock_set_senable.send(b'1')
+
+    def _unset_sendable(self):
+        if not self._sendable:
+            return
+        self._sendable = False
+        self._sock_unset_sendable.recv(1)
+
+    def _set_recvable(self):
+        if self._recvable:
+            return
+        self._recvable = True
+        self._sock_set_recvable.send(b'1')
+
+    def _unset_recvable(self):
+        if not self._recvable:
+            return
+        self._recvable = False
+        self._sock_unset_recvable.recv(1)
+
+    def _full(self):
+        return len(self._queue) >= self.bufsize
+
+    def _empty(self):
+        return len(self._queue) <= 0
 
     def try_recv(self):
         with self._lock:
-            if len(self._queue) <= 0:
+            if self._empty():
                 if self._closed:
                     raise ChannelClosed()
+                self._unset_recvable()
                 return False, None
-            self._sock_notify_sender.send(b'1')
-            self._sock_receiver_wait.recv(1)
+            self._set_sendable()
             item = self._queue.popleft()
             return True, item
 
@@ -44,10 +74,10 @@ class ChannelController:
         with self._lock:
             if self._closed:
                 raise ChannelClosed()
-            if len(self._queue) >= self.bufsize:
+            if self._full():
+                self._unset_sendable()
                 return False
-            self._sock_notify_receiver.send(b'1')
-            self._sock_sender_wait.recv(1)
+            self._set_recvable()
             self._queue.append(item)
             return True
 
@@ -56,8 +86,8 @@ class ChannelController:
             if self._closed:
                 return
             self._closed = True
-            self._sock_notify_sender.send(b'x')
-            self._sock_notify_receiver.send(b'x')
+            self._s1.send(b'x')
+            self._s2.send(b'x')
 
     def destroy(self):
         self.close()
@@ -67,4 +97,5 @@ class ChannelController:
 
     @property
     def closed(self):
-        return self._closed
+        with self._lock:
+            return self._closed

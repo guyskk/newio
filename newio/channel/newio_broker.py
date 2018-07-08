@@ -50,7 +50,7 @@ class NewioBroker:
                 await self._recv_cond.notify_all()
                 break
             else:
-                await self._recv_cond.notify()
+                await self._recv_cond.notify_all()
         LOG.debug('[stopped] channel newio receiver broker')
 
     async def _sender_broker(self):
@@ -63,5 +63,5 @@ class NewioBroker:
                 await self._send_cond.notify_all()
                 break
             else:
-                await self._send_cond.notify()
+                await self._send_cond.notify_all()
         LOG.debug('[stopped] channel newio sender broker')

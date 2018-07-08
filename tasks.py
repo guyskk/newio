@@ -83,4 +83,4 @@ def version(ctx, bump='+'):
 @task
 def benchmark(ctx, producer='', consumer='', debug=False):
     init_logging(debug)
-    benchmark_channel.benchmark(producer, consumer)
+    benchmark_channel.benchmark(producer, (1, 9), consumer, (1, 9))
