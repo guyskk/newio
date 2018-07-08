@@ -84,11 +84,12 @@ async def test_channel(producer, num_producer, consumer, num_consumer):
 
 @pytest.mark.parametrize('num_producer', [1, 10])
 @pytest.mark.parametrize('num_consumer', [1, 10])
+@pytest.mark.parametrize('bufsize', [1, 10])
 @run_it
-async def test_mix_channel(num_producer, num_consumer):
+async def test_mix_channel(num_producer, num_consumer, bufsize):
     producers = []
     consumers = []
-    async with Channel() as channel:
+    async with Channel(bufsize) as channel:
         for _ in range(num_producer):
             for producer in producers:
                 producers.append(await spawn(producer(channel)))
