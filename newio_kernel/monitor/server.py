@@ -17,6 +17,7 @@ COMMANDS = {
     'get_task_list',
     'get_task',
     'cancel_task',
+    'open_shell',
 }
 
 

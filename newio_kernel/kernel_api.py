@@ -2,7 +2,7 @@ from traceback import format_exception
 
 
 class KernelApiError(Exception):
-    '''kernel api error'''
+    """kernel api error"""
 
 
 class KernelApi:
@@ -40,7 +40,8 @@ class KernelApi:
         if task.is_alive:
             return task.format_stack()
         error_stack = format_exception(
-            type(task.error), task.error, task.error.__traceback__)
+            type(task.error), task.error, task.error.__traceback__
+        )
         return ''.join(error_stack)
 
     async def get_task_list(self):
@@ -65,3 +66,9 @@ class KernelApi:
             raise KernelApiError(f'task #{ident} not alive')
         self.kernel.engine.cancel(task)
         return self._format_task(task, with_stack=True)
+
+    async def open_shell(self):
+        import os
+        import manhole
+        manhole.install()
+        return os.getpid()

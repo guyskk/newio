@@ -1,3 +1,4 @@
+import os
 import sys
 import re
 from terminaltables import AsciiTable
@@ -62,6 +63,10 @@ class MonitorShell:
 
     def command_kill(self, ident):
         return self._cancel_task(int(ident))
+
+    def command_shell(self):
+        pid = self.client.open_shell()
+        os.system(f'manhole-cli {pid}')
 
     def command_help(self):
         self._show_help()

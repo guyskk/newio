@@ -1,6 +1,6 @@
-'''
+"""
 Newio Kernel
-'''
+"""
 import os
 import time
 import logging
@@ -31,7 +31,7 @@ MONITOR_DEFAULT_PORT = 49802
 
 
 class Runner:
-    '''coroutine runner'''
+    """coroutine runner"""
 
     def __init__(self, *args, **kwargs):
         self.k_args = args
@@ -81,8 +81,7 @@ class KernelTask:
         return state
 
     def __repr__(self):
-        return '<KernelTask#{} {} @{}>'.format(
-            self.ident, self.name, self.state)
+        return '<KernelTask#{} {} @{}>'.format(self.ident, self.name, self.state)
 
     def clean_waiting(self):
         if self.waiting:
@@ -114,7 +113,8 @@ class Kernel:
         self.executor = Executor(
             handler=self._executor_handler,
             max_num_thread=max_num_thread,
-            max_num_process=max_num_process)
+            max_num_process=max_num_process,
+        )
         self.main_task = None
         self.kernel_tasks = set()
         self.api = KernelApi(self)
@@ -137,14 +137,16 @@ class Kernel:
             self.monitor_port = monitor_port
         if self.monitor_enable:
             self.monitor_server = MonitorServer(
-                self.api, host=self.monitor_host, port=self.monitor_port)
+                self.api, host=self.monitor_host, port=self.monitor_port
+            )
             await self.monitor_server.start()
 
     def run(self, coro, timeout=None):
         self.main_task = self.start_task(self.kernel_main(coro))
         if timeout is not None:
             self.timer_queue.start_timer(
-                timeout, self._timer_action_cancel, (self.main_task,))
+                timeout, self._timer_action_cancel, (self.main_task,)
+            )
         try:
             self._run()
         except BaseException:
@@ -178,7 +180,7 @@ class Kernel:
             self.selector.close()
 
     def shutdown(self):
-        '''force exit'''
+        """force exit"""
         # force cancel all tasks
         while self.tasks:
             task = self.tasks.last.value
@@ -262,16 +264,27 @@ class Kernel:
         handler = getattr(self, call.__name__, None)
         if handler is None:
             raise RuntimeError('unknown syscall {}'.format(call.__name__))
-        handler(current, *args)
+        try:
+            handler(current, *args)
+        except Exception as ex:
+            stack = current.format_stack()
+            msg = (
+                f'kernel crash, syscall={call.__name__}, args={args}, '
+                f'current task {current}:\n' + stack
+            )
+            LOG.error(msg)
+            raise RuntimeError(msg) from ex
 
     def nio_sleep(self, current, seconds):
         timer = self.timer_queue.start_timer(
-            seconds, self._timer_action_wakeup, (current,))
+            seconds, self._timer_action_wakeup, (current,)
+        )
         current.waiting = timer
 
     def nio_timeout_after(self, current, seconds):
         timer = self.timer_queue.start_timer(
-            seconds, self._timer_action_timeout, (current,))
+            seconds, self._timer_action_timeout, (current,)
+        )
         user_timer = UserTimer(timer)
         self.engine.schedule(current, Command.send, user_timer)
 
