@@ -289,6 +289,11 @@ class Kernel:
         self.engine.schedule(current, Command.send, user_timer)
 
     def nio_unset_timer(self, current, user_timer):
+        if user_timer is None:
+            self.engine.schedule(
+                current, Command.throw, ValueError('timer must not None!')
+            )
+            return
         timer = user_timer._nio_ref_
         if timer is None:
             raise RuntimeError(f'timer {user_timer!r} not set in kernel')
@@ -338,12 +343,20 @@ class Kernel:
         self.engine.schedule(current, Command.send)
 
     def nio_wait_read(self, current, user_fd):
-        fd = self.selector.register_read(current, user_fd)
-        current.waiting = fd
+        try:
+            fd = self.selector.register_read(current, user_fd)
+            current.waiting = fd
+        except Exception as error:
+            LOG.exception(error)
+            self.engine.schedule(current, Command.throw, error)
 
     def nio_wait_write(self, current, user_fd):
-        fd = self.selector.register_write(current, user_fd)
-        current.waiting = fd
+        try:
+            fd = self.selector.register_write(current, user_fd)
+            current.waiting = fd
+        except Exception as error:
+            LOG.exception(error)
+            self.engine.schedule(current, Command.throw, error)
 
     def nio_run_in_thread(self, current, fn, args, kwargs):
         fut = self.executor.run_in_thread(current, fn, args, kwargs)
