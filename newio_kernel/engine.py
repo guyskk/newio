@@ -37,6 +37,7 @@ class Engine:
         self._tasks.appendleft((task, command, *value))
 
     def execute(self, task, command, *value):
+        LOG.info('execute %s %s %s', task, command.__name__, value)
         try:
             call, *args = command(task, *value)
         except StopIteration as stoped:
