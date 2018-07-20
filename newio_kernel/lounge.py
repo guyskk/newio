@@ -4,7 +4,6 @@ LOG = logging.getLogger(__name__)
 
 
 class KernelLounge:
-
     def __init__(self, user_lounge):
         self._nio_ref_ = user_lounge
         user_lounge._nio_ref_ = self

@@ -12,8 +12,9 @@ from tests.echo_server import start_echo_server
 from benchmark import benchmark_channel
 
 
-LOG_FMT = ('%(levelname)1.1s %(asctime)s P%(process)-5s '
-           '%(name)s:%(lineno)-4d %(message)s')
+LOG_FMT = (
+    '%(levelname)1.1s %(asctime)s P%(process)-5s %(name)s:%(lineno)-4d %(message)s'
+)
 
 
 def init_logging(debug=False):

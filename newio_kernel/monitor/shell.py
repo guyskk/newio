@@ -83,12 +83,9 @@ class MonitorShell:
         tasks = self.client.get_task_list()
         data = [('ID', 'Name', 'State', 'Waiting')]
         for task in tasks:
-            data.append((
-                task['ident'],
-                task['name'],
-                task['state'],
-                task['waiting'] or '',
-            ))
+            data.append(
+                (task['ident'], task['name'], task['state'], task['waiting'] or '')
+            )
         table = AsciiTable(data)
         sout(table.table)
         sout('\n')

@@ -70,5 +70,6 @@ class KernelApi:
     async def open_shell(self):
         import os
         import manhole
+
         manhole.install()
         return os.getpid()

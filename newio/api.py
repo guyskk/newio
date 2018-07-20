@@ -3,10 +3,21 @@ from . import syscall
 from .syscall import TaskCanceled, TaskTimeout, Timer, Task, Lounge
 
 __all__ = (
-    'TaskCanceled', 'TaskTimeout', 'Task', 'Timer', 'Lounge',
-    'wait_read', 'wait_write', 'sleep', 'spawn', 'current_task',
-    'run_in_thread', 'run_in_process', 'run_in_asyncio',
-    'timeout_after', 'open_nursery',
+    'TaskCanceled',
+    'TaskTimeout',
+    'Task',
+    'Timer',
+    'Lounge',
+    'wait_read',
+    'wait_write',
+    'sleep',
+    'spawn',
+    'current_task',
+    'run_in_thread',
+    'run_in_process',
+    'run_in_asyncio',
+    'timeout_after',
+    'open_nursery',
 )
 
 wait_read = syscall.nio_wait_read
@@ -44,9 +55,9 @@ class timeout_after:
     async def __aexit__(self, exc_type, exc_value, traceback):
         await syscall.nio_unset_timer(self._timer)
         should_suppress = (
-            exc_value is not None and
-            isinstance(exc_value, TaskTimeout) and
-            exc_value.timer is self._timer
+            exc_value is not None
+            and isinstance(exc_value, TaskTimeout)
+            and exc_value.timer is self._timer
         )
         return should_suppress
 

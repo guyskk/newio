@@ -5,7 +5,6 @@ LOG = logging.getLogger(__name__)
 
 
 class MockClock:
-
     def __init__(self):
         self._t = 10000
 

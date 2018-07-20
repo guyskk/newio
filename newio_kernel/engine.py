@@ -6,7 +6,6 @@ LOG = logging.getLogger(__name__)
 
 
 class Command:
-
     @staticmethod
     def send(task, value=None):
         return task.send(value)
@@ -25,7 +24,6 @@ class Command:
 
 
 class Engine:
-
     def __init__(self, syscall_handler):
         self._syscall_handler = syscall_handler
         self._tasks = deque()

@@ -30,6 +30,7 @@ async def test_cancel_dead_task(caplog):
                 await nio.sleep(1)
             except BaseException:
                 pass
+
     task = await nio.spawn(dead_task())
     caplog.clear()
     with caplog.at_level(logging.ERROR):

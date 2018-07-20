@@ -33,8 +33,7 @@ class MonitorClient:
             raise
 
     def _call_impl(self, command, *args, **kwargs):
-        request = json.dumps([command, args, kwargs],
-                             ensure_ascii=False).strip()
+        request = json.dumps([command, args, kwargs], ensure_ascii=False).strip()
         request_bytes = request.encode('utf-8') + b'\n'
         self.sock.sendall(request_bytes)
         data = self._read_response()

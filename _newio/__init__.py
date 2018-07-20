@@ -11,9 +11,7 @@ def parse_requires(name):
         return f.read().splitlines()
 
 
-package_data = {
-    '_newio': ['version.txt']
-}
+package_data = {'_newio': ['version.txt']}
 
 
 def find_packages(target):

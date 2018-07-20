@@ -5,6 +5,7 @@ from .api import wait_read, wait_write
 
 try:
     from ssl import SSLWantReadError, SSLWantWriteError
+
     WantRead = (BlockingIOError, SSLWantReadError)
     WantWrite = (BlockingIOError, SSLWantWriteError)
 except ImportError:

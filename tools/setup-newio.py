@@ -21,7 +21,5 @@ setup(
     package_data=_newio.package_data,
     python_requires='>=3.6',
     install_requires=[],
-    extras_require={
-        'kernel': [f'newio-kernel=={version}'],
-    },
+    extras_require={'kernel': [f'newio-kernel=={version}']},
 )

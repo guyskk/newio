@@ -11,7 +11,7 @@ from newio_kernel import run
 
 _QUEUE_CLOSE = object()
 
-NUM_ITEMS = 10**3
+NUM_ITEMS = 10 ** 3
 
 
 def queue_producer(queue):
@@ -153,7 +153,7 @@ class Printer:
         qps = '{:>7d}'.format(int(NUM_ITEMS / t_total))
         t_setup, t_producer, t_consumer = [f'{x:.3f}' for x in result]
         t = f'{t_setup} + {t_producer} + {t_consumer}'
-        return (f' => {t} = {t_total:.3f}  {qps} QPS')
+        return f' => {t} = {t_total:.3f}  {qps} QPS'
 
     def print_result(self, result):
         self.results.append(result)
@@ -177,8 +177,8 @@ def benchmark(p_name='', p_n=(1, 9), c_name='', c_n=(1, 9)):
         if p_name not in 'queue_producer' or c_name not in 'queue_consumer':
             continue
         printer.print_title(
-            'queue_producer', num_producer,
-            'queue_consumer', num_consumer)
+            'queue_producer', num_producer, 'queue_consumer', num_consumer
+        )
         result = benchmark_queue(num_producer, num_consumer)
         printer.print_result(result)
     for producer, num_producer, consumer, num_consumer in product(
@@ -187,10 +187,8 @@ def benchmark(p_name='', p_n=(1, 9), c_name='', c_n=(1, 9)):
         if p_name not in producer.__name__ or c_name not in consumer.__name__:
             continue
         printer.print_title(
-            producer.__name__, num_producer,
-            consumer.__name__, num_consumer)
-        result = run(benchmark_channel(
-            producer, num_producer,
-            consumer, num_consumer))
+            producer.__name__, num_producer, consumer.__name__, num_consumer
+        )
+        result = run(benchmark_channel(producer, num_producer, consumer, num_consumer))
         printer.print_result(result)
     printer.print_sorted()

@@ -118,7 +118,7 @@ class TimerQueue:
             return self.tick_time + self.timeslice - self.clock()
 
     def _forward_far_buckets(self):
-        return [n for n in range(self.buckets) if self.tick % (2**n) == 0]
+        return [n for n in range(self.buckets) if self.tick % (2 ** n) == 0]
 
     def _forward(self):
         ticks = int((self.clock() - self.tick_time) // self.timeslice)

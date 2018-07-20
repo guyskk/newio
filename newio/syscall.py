@@ -173,7 +173,7 @@ def nio_wait_write(fd: int) -> None:
 
 
 @coroutine
-def nio_spawn(coro, cancel_after: float=None) -> Task:
+def nio_spawn(coro, cancel_after: float = None) -> Task:
     '''Spawn a task
 
     If cancel_after is not None, cancel the task after <cancel_after> seconds
@@ -216,7 +216,7 @@ def nio_join(task: Task) -> None:
 
 
 @coroutine
-def nio_sleep(seconds: float=0) -> None:
+def nio_sleep(seconds: float = 0) -> None:
     '''Sleep at least <sesonds> seconds
 
     Raises:

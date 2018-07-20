@@ -6,7 +6,6 @@ LOG = logging.getLogger(__name__)
 
 
 class KernelFd:
-
     def __init__(self, selector, fileno, task):
         self._selector = selector
         self._fileno = fileno
@@ -37,15 +36,16 @@ class KernelFd:
         self._selector._unregister(self)
 
     def __repr__(self):
-        return (f'<KernelFd#{self.fileno()} of '
-                f'task #{self.task.ident} {self.task.name}>')
+        return (
+            f'<KernelFd#{self.fileno()} of '
+            f'task #{self.task.ident} {self.task.name}>'
+        )
 
     def clean(self):
         self.unregister()
 
 
 class Selector:
-
     def __init__(self):
         self._sel = DefaultSelector()
         self._fds = {}

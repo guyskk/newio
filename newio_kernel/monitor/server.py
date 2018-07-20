@@ -13,12 +13,7 @@ from newio_kernel.kernel_api import KernelApiError
 LOG = logging.getLogger(__name__)
 
 REQUEST_MAX_SIZE = 1024 * 8
-COMMANDS = {
-    'get_task_list',
-    'get_task',
-    'cancel_task',
-    'open_shell',
-}
+COMMANDS = {'get_task_list', 'get_task', 'cancel_task', 'open_shell'}
 
 
 class MonitorServer:
