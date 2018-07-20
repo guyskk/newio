@@ -16,16 +16,21 @@ LOG = logging.getLogger(__name__)
 class ExecutorFuture:
     def __init__(self, handler, task, future):
         self._handler = handler
-        self._task = task
+        self.task = task
+        self.error = None
+        self.result = None
         self._fut = future
-        self._is_expired = False
+        self._cancelled = False
         future.add_done_callback(self._on_fn_done)
 
     def cancel(self):
-        if not self._is_expired:
-            LOG.debug('task %r cancel executor', self._task)
+        if not self._cancelled:
+            LOG.debug('task %r cancel executor', self.task)
+            self._cancelled = True
             self._fut.cancel()
-            self._is_expired = True
+
+    def cancelled(self):
+        return self._cancelled
 
     def state(self):
         return 'wait_executor'
@@ -34,9 +39,8 @@ class ExecutorFuture:
         self.cancel()
 
     def _on_fn_done(self, fut):
-        if self._is_expired:
+        if self._cancelled:
             return
-        self._is_expired = True
         result = error = None
         try:
             error = fut.exception()
@@ -45,11 +49,12 @@ class ExecutorFuture:
         except FutureCancelledError:
             return  # ignore
         if error:
-            LOG.debug('executor for task %r crashed:',
-                      self._task, exc_info=error)
+            LOG.debug('executor for task %r crashed:', self.task, exc_info=error)
         else:
-            LOG.debug('executor for task %r finished', self._task)
-        self._handler(self._task, result, error)
+            LOG.debug('executor for task %r finished', self.task)
+        self.error = error
+        self.result = result
+        self._handler(self)
 
 
 class Executor:
@@ -84,7 +89,7 @@ class Executor:
         is_exiting = False
         while True:
             try:
-                task, result, error = self._queue.get_nowait()
+                fut = self._queue.get_nowait()
             except Empty:
                 if is_exiting:
                     break
@@ -94,7 +99,8 @@ class Executor:
                     is_exiting = True
                     await self._wakeup.close()
             else:
-                self._handler(task, result, error)
+                if not fut.cancelled():
+                    self._handler(fut.task, fut.result, fut.error)
         LOG.debug('[stopped] executor agent')
 
     async def start(self):
@@ -117,8 +123,8 @@ class Executor:
         self._process_executor.shutdown(wait=wait)
         self._asyncio_executor.shutdown(wait=wait)
 
-    def handler(self, task, result, error):
-        self._queue.put_nowait((task, result, error))
+    def handler(self, fut):
+        self._queue.put_nowait(fut)
         if self._is_exiting:
             return
         with self._notify_lock:
