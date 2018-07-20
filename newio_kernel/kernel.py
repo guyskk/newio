@@ -191,7 +191,6 @@ class Kernel:
 
     def _run(self):
         while self.tasks:
-            print('-' * 80)
             self.timer_queue.check()
             self.engine.run()
             if not self.tasks:
