@@ -1,31 +1,20 @@
 import os
 import sys
 import shutil
-import logging
-import coloredlogs
 from pathlib import Path
 from invoke import task
 
 import _newio
-from newio_kernel import run
+from newio_kernel import run, init_logging
 from tests.echo_server import start_echo_server
 from benchmark import benchmark_channel
 
-
-LOG_FMT = (
-    '%(levelname)1.1s %(asctime)s P%(process)-5s %(name)s:%(lineno)-4d %(message)s'
-)
-
-
-def init_logging(debug=False):
-    if debug:
-        coloredlogs.install(level=logging.DEBUG, fmt=LOG_FMT)
+init_logging('newio', 'newio_kernel')
 
 
 @task
-def echo_server(ctx, host='127.0.0.1', port=25000, debug=False):
+def echo_server(ctx, host='127.0.0.1', port=25000):
     """start echo server"""
-    init_logging(debug)
     run(start_echo_server(host, port))
 
 
@@ -86,6 +75,5 @@ def version(ctx, bump='+'):
 
 
 @task
-def benchmark(ctx, producer='', consumer='', debug=False):
-    init_logging(debug)
+def benchmark(ctx, producer='', consumer=''):
     benchmark_channel.benchmark(producer, (1, 9), consumer, (1, 9))

@@ -1,5 +1,6 @@
 import _newio
 from .kernel import Runner
+from .logger import init_logging  # noqa
 
 run = Runner()
 
