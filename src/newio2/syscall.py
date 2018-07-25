@@ -1,5 +1,3 @@
-from asyncio import futures
-
 
 _kernel = None
 
@@ -13,16 +11,13 @@ def _set_kernel(kernel):
 
 def _get_kernel():
     global _kernel
+    if _kernel is None:
+        raise RuntimeError('kernel not running!')
     return _kernel
 
 
-class NewioFuture(futures.Future):
-    def __init__(self, call, *args):
-        super().__init__()
-        _get_kernel().syscall(self, call.__name__, *args)
-
-    def _wait(self, fut):
-        futures._chain_future(fut, self)
+def _syscall(call, *args):
+    return _get_kernel().syscall(call.__name__, *args)
 
 
 class TaskCanceled(BaseException):
@@ -37,21 +32,14 @@ class TaskCanceled(BaseException):
     """
 
 
-class TaskTimeout(Exception):
-    """Exception raised when task timeout."""
-
-    def __init__(self, timer):
-        self.timer = timer
-
-
-class Timer:
-    def __init__(self, aio_timer):
-        self._aio_timer = aio_timer
-
-
 class Task:
-    def __init__(self, aio_task):
+    def __init__(self, name, aio_task):
+        self._name = name
         self._aio_task = aio_task
+        self._exception = None
+
+    def __repr__(self):
+        return f'<Task {self._name} at {hex(id(self))}>'
 
     async def join(self):
         return await nio_join(self)
@@ -81,7 +69,7 @@ async def nio_wait_read(fd: int) -> None:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_wait_read, fd)
+    return await _syscall(nio_wait_read, fd)
 
 
 async def nio_wait_write(fd: int) -> None:
@@ -91,7 +79,7 @@ async def nio_wait_write(fd: int) -> None:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_wait_write, fd)
+    return await _syscall(nio_wait_write, fd)
 
 
 async def nio_spawn(coro) -> Task:
@@ -100,7 +88,7 @@ async def nio_spawn(coro) -> Task:
     Raises:
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_spawn, coro)
+    return await _syscall(nio_spawn, coro)
 
 
 async def nio_current_task() -> Task:
@@ -109,7 +97,7 @@ async def nio_current_task() -> Task:
     Raises:
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_current_task)
+    return await _syscall(nio_current_task)
 
 
 async def nio_cancel(task: Task) -> None:
@@ -118,7 +106,7 @@ async def nio_cancel(task: Task) -> None:
     This call will return immediately, before task stoped. This call will not
     raise TaskCanceled, so it's safe to cancel multiple tasks one by one.
     """
-    return await NewioFuture(nio_cancel, task)
+    return await _syscall(nio_cancel, task)
 
 
 async def nio_join(task: Task) -> None:
@@ -128,7 +116,7 @@ async def nio_join(task: Task) -> None:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_join, task)
+    return await _syscall(nio_join, task)
 
 
 async def nio_sleep(seconds: float = 0) -> None:
@@ -138,25 +126,7 @@ async def nio_sleep(seconds: float = 0) -> None:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_sleep, seconds)
-
-
-async def nio_set_timeout(seconds: float) -> Timer:
-    """Set a timer for timeout current task after <seconds> seconds
-
-    Raises:
-        TaskCanceled: task canceled
-    """
-    return await NewioFuture(nio_set_timeout, seconds)
-
-
-async def nio_unset_timeout(timer: Timer) -> None:
-    """Unset a timer for current task
-
-    Raises:
-        TaskCanceled: task canceled
-    """
-    return await NewioFuture(nio_unset_timeout, timer)
+    return await _syscall(nio_sleep, seconds)
 
 
 async def nio_condition_wait(condition: Condition) -> None:
@@ -166,7 +136,7 @@ async def nio_condition_wait(condition: Condition) -> None:
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_condition_wait, condition)
+    return await _syscall(nio_condition_wait, condition)
 
 
 async def nio_condition_notify(condition: Condition, n: int = 1) -> None:
@@ -175,7 +145,7 @@ async def nio_condition_notify(condition: Condition, n: int = 1) -> None:
     Raises:
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_condition_notify, condition, n)
+    return await _syscall(nio_condition_notify, condition, n)
 
 
 async def nio_condition_notify_all(condition: Condition) -> None:
@@ -184,7 +154,7 @@ async def nio_condition_notify_all(condition: Condition) -> None:
     Raises:
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_condition_notify_all, condition)
+    return await _syscall(nio_condition_notify_all, condition)
 
 
 async def nio_run_in_thread(fn, *args, **kwargs):
@@ -194,7 +164,7 @@ async def nio_run_in_thread(fn, *args, **kwargs):
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_run_in_thread, fn, args, kwargs)
+    return await _syscall(nio_run_in_thread, fn, args, kwargs)
 
 
 async def nio_run_in_process(fn, *args, **kwargs):
@@ -204,4 +174,4 @@ async def nio_run_in_process(fn, *args, **kwargs):
         TaskTimeout: task timeout
         TaskCanceled: task canceled
     """
-    return await NewioFuture(nio_run_in_process, fn, args, kwargs)
+    return await _syscall(nio_run_in_process, fn, args, kwargs)

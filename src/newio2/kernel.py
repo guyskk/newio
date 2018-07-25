@@ -1,37 +1,61 @@
+import os
 import asyncio
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
-from .syscall import Task, Timer, _set_kernel
+import aiomonitor
+
+from .syscall import Task, _set_kernel, TaskCanceled
 
 
-def run(coro):
-    loop = asyncio.get_event_loop()
-    loop.set_debug(True)
-    kernel = Kernel(coro, loop=loop)
-    return kernel.run()
+class Runner:
+    """coroutine runner"""
+
+    def __init__(self, *args, **kwargs):
+        self.k_args = args
+        self.k_kwargs = kwargs
+
+    def __call__(self, *args, **kwargs):
+        kernel = Kernel(*self.k_args, **self.k_kwargs)
+        return kernel.run(*args, **kwargs)
+
+
+DEFAULT_MAX_NUM_PROCESS = os.cpu_count() * 2
+DEFAULT_MAX_NUM_THREAD = DEFAULT_MAX_NUM_PROCESS * 16
+
+
+def _get_task_name(coro):
+    name = getattr(coro, '__qualname__', None)
+    if name is None:
+        name = getattr(coro, '__name__', None)
+    if name is None:
+        return str(coro)
+    return name
 
 
 class Kernel:
-    def __init__(self, coro, *, loop):
-        self.coro = coro
+    def __init__(self, *, loop=None):
+        if loop is None:
+            loop = asyncio.get_event_loop()
+        loop.set_debug(True)
         self.loop = loop
-        self.thread_executor = ThreadPoolExecutor(100)
-        self.process_executor = ProcessPoolExecutor()
+        self.thread_executor = ThreadPoolExecutor(DEFAULT_MAX_NUM_THREAD)
+        self.process_executor = ProcessPoolExecutor(DEFAULT_MAX_NUM_PROCESS)
 
-    async def main(self):
+    async def main(self, coro):
         try:
-            return await self.coro
+            return await coro
         finally:
             self.loop.stop()
 
-    def run(self):
+    def run(self, coro):
         _set_kernel(self)
         asyncio.set_event_loop(self.loop)
-        main_task = self.loop.create_task(self.main())
+        main_task = self._create_task(self.main(coro))
         try:
-            self.loop.run_forever()
-            return main_task.result()
+            with aiomonitor.start_monitor(loop=self.loop):
+                self.loop.run_forever()
+            return main_task._aio_task.result()
         finally:
             asyncio.set_event_loop(None)
             _set_kernel(None)
@@ -42,105 +66,101 @@ class Kernel:
         self.thread_executor.shutdown(wait=False)
         self.process_executor.shutdown(wait=False)
 
-    def syscall(self, fut, call, *args):
+    def _create_task(self, coro):
+        aio_task = self.loop.create_task(coro)
+        name = _get_task_name(coro)
+        task = Task(name, aio_task)
+        aio_task._newio_task = task
+        return task
+
+    async def syscall(self, call, *args):
         handler = getattr(self, call, None)
         if not handler:
             raise RuntimeError(f'unknown syscall {call}')
-        handler(fut, *args)
+        aio_task = asyncio.Task.current_task()
+        current = getattr(aio_task, '_newio_task', None)
+        if current is None:
+            raise RuntimeError('syscall only available for newio task!')
+        print(f'syscall {current} {call} {args}')
+        return await handler(current, *args)
 
-    def nio_sleep(self, current, seconds):
-        current._wait(asyncio.sleep(seconds))
+    async def nio_sleep(self, current, seconds):
+        return await asyncio.sleep(seconds)
 
-    def nio_run_in_thread(self, current, fn, args, kwargs):
+    async def nio_run_in_thread(self, current, fn, args, kwargs):
         _fn = partial(fn, *args, **kwargs)
-        fut = self.loop.run_in_executor(self.thread_executor, _fn)
-        current._wait(fut)
+        return await self.loop.run_in_executor(self.thread_executor, _fn)
 
-    def nio_run_in_process(self, current, fn, args, kwargs):
+    async def nio_run_in_process(self, current, fn, args, kwargs):
         _fn = partial(fn, *args, **kwargs)
-        fut = self.loop.run_in_executor(self.process_executor, _fn)
-        current._wait(fut)
+        return await self.loop.run_in_executor(self.process_executor, _fn)
 
-    def nio_wait_read(self, current, fd):
+    async def nio_wait_read(self, current, fd):
+        fut = self.loop.create_future()
+
         def callback():
-            current.set_result(None)
+            fut.set_result(None)
             self.loop.remove_reader(fd)
 
         self.loop.add_reader(fd, callback)
+        return await fut
 
-    def nio_wait_write(self, current, fd):
+    async def nio_wait_write(self, current, fd):
+        fut = self.loop.create_future()
+
         def callback():
-            current.set_result(None)
+            fut.set_result(None)
             self.loop.remove_writer(fd)
 
         self.loop.add_writer(fd, callback)
+        return await fut
 
-    def nio_set_timeout(self, current, seconds):
-        def callback():
-            current.cancal()
+    async def nio_spawn(self, current, coro):
+        return self._create_task(coro)
 
-        aio_timer = self.loop.call_later(seconds, callback)
-        timer = Timer(aio_timer)
-        current.set_result(timer)
+    async def nio_current_task(self, current):
+        return current
 
-    def nio_unset_timeout(self, current, timer):
-        timer._aio_timer.cancel()
-        current.set_result(None)
-
-    def nio_spawn(self, current, coro):
-        aio_task = self.loop.create_task(coro)
-        task = Task(aio_task)
-        aio_task._newio_task = task
-        current.set_result(task)
-
-    def nio_current_task(self, current):
-        aio_task = asyncio.current_task()
-        current.set_result(aio_task._newio_task)
-
-    def nio_cancel(self, current, task):
+    async def nio_cancel(self, current, task):
+        task._exception = TaskCanceled()
         task._aio_task.cancal()
-        current.set_result(None)
 
-    def nio_join(self, current, task):
-        current._wait(task._aio_task)
+    async def nio_join(self, current, task):
+        try:
+            return await task._aio_task
+        except asyncio.CancelledError:
+            if task._exception is not None:
+                raise task._exception from None
+            raise
 
-    def nio_condition_wait(self, current, condition):
+    async def nio_condition_wait(self, current, condition):
         _init_condition(condition)
-        current._wait(_cond_wait(condition._aio_contition))
+        cond = condition._aio_contition
+        await cond.acquire()
+        try:
+            await cond.wait()
+        finally:
+            cond.release()
 
-    def nio_condition_notify(self, current, condition, n=1):
+    async def nio_condition_notify(self, current, condition, n=1):
         _init_condition(condition)
-        current._wait(_cond_notify(condition._aio_contition, n))
+        cond = condition._aio_contition
+        await cond.acquire()
+        try:
+            cond.notify(n)
+        finally:
+            cond.release()
 
-    def nio_condition_notify_all(self, current, condition):
+    async def nio_condition_notify_all(self, current, condition):
         _init_condition(condition)
-        current._wait(_cond_notify_all(condition._aio_contition))
+        cond = condition._aio_contition
+        await cond.acquire()
+        try:
+            cond.notify_all()
+        finally:
+            cond.release()
 
 
 def _init_condition(self, condition):
     if condition._aio_contition is None:
         condition._aio_contition = asyncio.Condition()
-
-
-async def _cond_wait(cond):
-    await cond.acquire()
-    try:
-        await cond.wait()
-    finally:
-        cond.release()
-
-
-async def _cond_notify(cond, n):
-    await cond.acquire()
-    try:
-        cond.notify(n)
-    finally:
-        cond.release()
-
-
-async def _cond_notify_all(cond):
-    await cond.acquire()
-    try:
-        cond.notify_all()
-    finally:
-        cond.release()
