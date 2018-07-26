@@ -1,11 +1,11 @@
 """Newio common API for users"""
 import asyncio
 import async_timeout
+from asyncio import CancelledError
 
 from . import _syscall
 from ._syscall import Task
 from ._kernel import Runner
-from .contextlib import suppress
 
 run = Runner()
 
@@ -13,6 +13,7 @@ run = Runner()
 __all__ = (
     'Task',
     'Runner',
+    'CancelledError',
     'run',
     'wait_read',
     'wait_write',
@@ -84,23 +85,21 @@ class Nursery:
         self._tasks = []
         self._is_closed = False
 
-    async def spawn(self, coro):
+    async def spawn(self, corofunc, *args, **kwargs):
         """Spawn task in the nursery"""
         if self._is_closed:
             raise RuntimeError('nursery already closed')
-        task = await spawn(coro)
+        task = await spawn(corofunc, *args, **kwargs)
         self._tasks.append(task)
         return task
 
     async def _join(self):
         for task in self._tasks:
-            with suppress(Exception):
-                await task.join()
+            await task.join()
 
     async def _cancel(self):
         for task in self._tasks:
-            with suppress(Exception):
-                await task.cancel()
+            await task.cancel()
 
     async def __aenter__(self):
         if self._is_closed:
@@ -110,6 +109,10 @@ class Nursery:
     async def __aexit__(self, exc_type, exc_value, traceback):
         self._is_closed = True
         if exc_value is None:
-            await self._join()
+            try:
+                await self._join()
+            except Exception:
+                await self._cancel()
+                raise
         else:
             await self._cancel()

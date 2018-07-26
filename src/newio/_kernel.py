@@ -1,11 +1,13 @@
 import os
 import asyncio
+import inspect
 from functools import partial
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 import aiomonitor
 
 from ._syscall import Task, _set_kernel
+from .contextlib import suppress
 
 
 class Runner:
@@ -24,12 +26,14 @@ DEFAULT_MAX_NUM_PROCESS = os.cpu_count() * 2
 DEFAULT_MAX_NUM_THREAD = DEFAULT_MAX_NUM_PROCESS * 16
 
 
-def _get_task_name(coro):
-    name = getattr(coro, '__qualname__', None)
-    if name is None:
-        name = getattr(coro, '__name__', None)
-    if name is None:
-        return str(coro)
+def _get_name(obj):
+    name = getattr(obj, '__qualname__', None)
+    if not name:
+        name = getattr(obj, '__name__', None)
+    if not name:
+        name = str(obj)
+    if not name:
+        name = repr(obj)
     return name
 
 
@@ -84,9 +88,14 @@ class Kernel:
         self.thread_executor.shutdown(wait=False)
         self.process_executor.shutdown(wait=False)
 
-    def _create_task(self, coro):
+    def _create_task(self, corofunc, *args, **kwargs):
+        if inspect.isawaitable(corofunc):
+            name = _get_name(corofunc)
+            coro = corofunc
+        else:
+            name = corofunc.__module__ + '.' + _get_name(corofunc)
+            coro = corofunc(*args, **kwargs)
         aio_task = self.loop.create_task(coro)
-        name = _get_task_name(coro)
         task = Task(name, aio_task)
         aio_task._newio_task = task
         return task
@@ -116,8 +125,14 @@ class Kernel:
         fut = self.loop.create_future()
 
         def callback():
-            fut.set_result(None)
-            self.loop.remove_reader(fd)
+            # 大量连续IO的情况下，需要避免频繁注册-取消FD，否则性能会明显下降
+            # 解决方案：第一次回调时不取消注册FD，如果后续还有IO，则当前callback会被替换掉；
+            # 如果后续没有IO，则callback会再次执行，此时取消注册。
+            # 参考：asyncio.selector_events.sock_recv的实现，以及curio kernel关于unregister的注释
+            if fut.done():
+                self.loop.remove_reader(fd)
+            else:
+                fut.set_result(None)
 
         self.loop.add_reader(fd, callback)
         return await fut
@@ -126,20 +141,25 @@ class Kernel:
         fut = self.loop.create_future()
 
         def callback():
-            fut.set_result(None)
-            self.loop.remove_writer(fd)
+            # 原理同nio_wait_read
+            if fut.done():
+                self.loop.remove_writer(fd)
+            else:
+                fut.set_result(None)
 
         self.loop.add_writer(fd, callback)
         return await fut
 
-    async def nio_spawn(self, current, coro):
-        return self._create_task(coro)
+    async def nio_spawn(self, current, corofunc, args, kwargs):
+        return self._create_task(corofunc, *args, **kwargs)
 
     async def nio_current_task(self, current):
         return current
 
     async def nio_cancel(self, current, task):
         task._aio_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task._aio_task
 
     async def nio_join(self, current, task):
         return await task._aio_task

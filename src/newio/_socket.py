@@ -1,7 +1,8 @@
+import asyncio
 from socket import SOL_SOCKET, SO_ERROR
 
-from .contextlib import contextmanager
-from .api import wait_read, wait_write
+from .api import wait_read, wait_write, run_in_thread
+from .compat import PY37
 
 try:
     from ssl import SSLWantReadError, SSLWantWriteError
@@ -11,6 +12,9 @@ try:
 except ImportError:
     WantRead = (BlockingIOError,)
     WantWrite = (BlockingIOError,)
+
+
+_loop = asyncio.get_event_loop
 
 
 class Socket:
@@ -23,7 +27,6 @@ class Socket:
         self._socket = sock
         self._socket.setblocking(False)
         self._fd = sock.fileno()
-        # Commonly used bound methods
         self._socket_send = sock.send
         self._socket_recv = sock.recv
 
@@ -47,36 +50,27 @@ class Socket:
 
     @property
     def socket(self):
+        """access to the underlying socket in non-blocking mode"""
         return self._socket
 
-    @contextmanager
-    def blocking(self):
-        """
-        Allow temporary access to the underlying socket in blocking mode
-        """
-        try:
-            self._socket.setblocking(True)
-            yield self._socket
-        finally:
-            self._socket.setblocking(False)
+    async def recv(self, bufsize, flags=0):
+        return await _loop().sock_recv(self._socket, bufsize)
 
-    async def recv(self, maxsize, flags=0):
-        while True:
-            try:
-                return self._socket_recv(maxsize, flags)
-            except WantRead:
-                await wait_read(self._fd)
-            except WantWrite:
-                await wait_write(self._fd)
+    if PY37:
 
-    async def recv_into(self, buffer, nbytes=0, flags=0):
-        while True:
-            try:
-                return self._socket.recv_into(buffer, nbytes, flags)
-            except WantRead:
-                await wait_read(self._fd)
-            except WantWrite:
-                await wait_write(self._fd)
+        async def recv_into(self, buffer, nbytes=0, flags=0):
+            return await _loop().sock_recv_into(self._socket, buffer)
+
+    else:
+
+        async def recv_into(self, buffer, nbytes=0, flags=0):
+            while True:
+                try:
+                    return self._socket.recv_into(buffer, nbytes, flags)
+                except WantRead:
+                    await wait_read(self._fd)
+                except WantWrite:
+                    await wait_write(self._fd)
 
     async def send(self, data, flags=0):
         while True:
@@ -88,23 +82,25 @@ class Socket:
                 await wait_read(self._fd)
 
     async def sendall(self, data, flags=0):
-        buffer = memoryview(data).cast('b')
-        while buffer:
-            try:
-                nsent = self._socket_send(buffer, flags)
-                buffer = buffer[nsent:]
-            except WantWrite:
-                await wait_write(self._fd)
-            except WantRead:
-                await wait_read(self._fd)
+        return await _loop().sock_sendall(self._socket, data)
+
+    if PY37:
+
+        async def sendfile(self, file, offset=0, count=None):
+            return await _loop().sock_sendfile(
+                self._socket, file, offset=offset, count=count
+            )
+
+    else:
+
+        async def sendfile(self, file, offset=0, count=None):
+            return await run_in_thread(
+                super().sendfile, file, offset=offset, count=count
+            )
 
     async def accept(self):
-        while True:
-            try:
-                client, addr = self._socket.accept()
-                return type(self)(client), addr
-            except WantRead:
-                await wait_read(self._fd)
+        client, addr = await _loop().sock_accept(self._socket)
+        return type(self)(client), addr
 
     async def connect_ex(self, address):
         try:

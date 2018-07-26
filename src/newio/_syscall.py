@@ -46,9 +46,9 @@ async def nio_wait_write(fd: int) -> None:
     return await _syscall(nio_wait_write, fd)
 
 
-async def nio_spawn(coro) -> Task:
+async def nio_spawn(corofunc, *args, **kwargs) -> Task:
     """Spawn a task"""
-    return await _syscall(nio_spawn, coro)
+    return await _syscall(nio_spawn, corofunc, args, kwargs)
 
 
 async def nio_current_task() -> Task:
@@ -57,12 +57,12 @@ async def nio_current_task() -> Task:
 
 
 async def nio_cancel(task: Task) -> None:
-    """Cancel a task"""
+    """Cancel a task, wait until the task actually terminates"""
     return await _syscall(nio_cancel, task)
 
 
 async def nio_join(task: Task) -> None:
-    """Join a task, wait until the task stoped"""
+    """Join a task, wait until the task stopped"""
     return await _syscall(nio_join, task)
 
 

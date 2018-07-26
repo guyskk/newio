@@ -1,7 +1,7 @@
 import functools
 from newio import Runner
 
-run = Runner(debug=True)
+run = Runner(debug=True, monitor=False)
 
 
 def run_it(coro_func):
