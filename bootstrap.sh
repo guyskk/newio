@@ -1,7 +1,6 @@
 #! /bin/bash
 set -ex
 
-pip install -r tools/requires-dev.txt
-pip install -r tools/requires-newio-kernel.txt
+pip install -e .[dev]
 
 pre-commit install

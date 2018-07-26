@@ -1,6 +1,4 @@
-import os
 import sys
-import shutil
 from pathlib import Path
 from invoke import task
 
@@ -30,10 +28,7 @@ def build(ctx, target='all'):
     """build package"""
     for f in Path('dist').glob('*'):
         f.unlink()
-    for name in _get_targets(target):
-        shutil.copy(f'tools/setup-{name}.py', 'setup.py')
-        ctx.run('python setup.py sdist')
-        os.remove('setup.py')
+    ctx.run('python setup.py sdist')
 
 
 @task
