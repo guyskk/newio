@@ -3,17 +3,15 @@ from contextlib import suppress
 import asyncio
 import async_timeout
 
-from . import syscall
-from .syscall import TaskCanceled, Task, Condition
-from .kernel import Runner
+from . import _syscall
+from ._syscall import Task
+from ._kernel import Runner
 
 run = Runner()
 
 
 __all__ = (
-    'TaskCanceled',
     'Task',
-    'Condition',
     'Runner',
     'run',
     'wait_read',
@@ -27,13 +25,13 @@ __all__ = (
     'open_nursery',
 )
 
-wait_read = syscall.nio_wait_read
-wait_write = syscall.nio_wait_write
-run_in_thread = syscall.nio_run_in_thread
-run_in_process = syscall.nio_run_in_process
-sleep = syscall.nio_sleep
-spawn = syscall.nio_spawn
-current_task = syscall.nio_current_task
+wait_read = _syscall.nio_wait_read
+wait_write = _syscall.nio_wait_write
+run_in_thread = _syscall.nio_run_in_thread
+run_in_process = _syscall.nio_run_in_process
+sleep = _syscall.nio_sleep
+spawn = _syscall.nio_spawn
+current_task = _syscall.nio_current_task
 
 
 class timeout:
@@ -54,6 +52,9 @@ class timeout:
     def __bool__(self):
         return self._timer.expired
 
+    def __repr__(self):
+        return f'<timeout {bool(self)} at {hex(id(self))}>'
+
     async def __aenter__(self):
         await self._timer.__aenter__()
         return self
@@ -68,10 +69,10 @@ class timeout:
 
 
 def open_nursery():
-    return _Nursery()
+    return Nursery()
 
 
-class _Nursery:
+class Nursery:
     """Nursery is manager of tasks, it will take care of it spawned tasks.
 
     All tasks spawned by the nursery are ensure stoped after nursery exited.

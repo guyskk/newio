@@ -14,10 +14,10 @@ except ImportError:
 
 
 class Socket:
-    '''
+    """
     Non-blocking wrapper around a socket object.   The original socket is put
     into a non-blocking mode when it's wrapped.
-    '''
+    """
 
     def __init__(self, sock):
         self._socket = sock
@@ -51,9 +51,9 @@ class Socket:
 
     @contextmanager
     def blocking(self):
-        '''
+        """
         Allow temporary access to the underlying socket in blocking mode
-        '''
+        """
         try:
             self._socket.setblocking(True)
             yield self._socket

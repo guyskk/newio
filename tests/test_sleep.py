@@ -9,9 +9,9 @@ async def test_sleep():
     begin = time.monotonic()
     tasks = []
     for i in range(5):
-        task = await nio.spawn(nio.sleep(0.2))
+        task = await nio.spawn(nio.sleep(0.1))
         tasks.append(task)
     for task in tasks:
         await task.join()
     cost = time.monotonic() - begin
-    assert cost >= 0.2 and cost < 0.3
+    assert cost >= 0.1 and cost < 0.2

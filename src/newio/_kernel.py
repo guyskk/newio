@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 
 import aiomonitor
 
-from .syscall import Task, _set_kernel, TaskCanceled
+from ._syscall import Task, _set_kernel
 
 
 class Runner:
@@ -34,11 +34,15 @@ def _get_task_name(coro):
 
 
 class Kernel:
-    def __init__(self, *, loop=None):
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        loop.set_debug(True)
+    def __init__(self, *, loop_policy=None, monitor=None, debug=None):
+        if loop_policy is None:
+            loop_policy = asyncio.get_event_loop_policy()
+        loop = loop_policy.new_event_loop()
+        if debug is not None:
+            loop.set_debug(debug)
+        asyncio.set_event_loop(loop)
         self.loop = loop
+        self.monitor = monitor
         self.thread_executor = ThreadPoolExecutor(DEFAULT_MAX_NUM_THREAD)
         self.process_executor = ProcessPoolExecutor(DEFAULT_MAX_NUM_PROCESS)
 
@@ -50,16 +54,30 @@ class Kernel:
 
     def run(self, coro):
         _set_kernel(self)
-        asyncio.set_event_loop(self.loop)
-        main_task = self._create_task(self.main(coro))
         try:
-            with aiomonitor.start_monitor(loop=self.loop):
-                self.loop.run_forever()
-            return main_task._aio_task.result()
+            return self._run_complete(coro)
         finally:
-            asyncio.set_event_loop(None)
             _set_kernel(None)
             self.close()
+
+    def _run_complete(self, coro):
+        main_task = self._create_task(self.main(coro))
+        try:
+            if self.monitor:
+                with aiomonitor.start_monitor(loop=self.loop):
+                    self.loop.run_forever()
+            else:
+                self.loop.run_forever()
+        except BaseException:
+            # 处理KeyboardInterrupt等异常，保证main_task完整运行结束
+            main_task._aio_task.cancel()
+            try:
+                self.loop.run_until_complete(main_task._aio_task)
+            except asyncio.CancelledError:
+                pass  # ignore
+            raise
+        else:
+            return main_task._aio_task.result()
 
     def close(self):
         self.loop.close()
@@ -81,7 +99,6 @@ class Kernel:
         current = getattr(aio_task, '_newio_task', None)
         if current is None:
             raise RuntimeError('syscall only available for newio task!')
-        print(f'syscall {current} {call} {args}')
         return await handler(current, *args)
 
     async def nio_sleep(self, current, seconds):
@@ -122,45 +139,7 @@ class Kernel:
         return current
 
     async def nio_cancel(self, current, task):
-        task._exception = TaskCanceled()
-        task._aio_task.cancal()
+        task._aio_task.cancel()
 
     async def nio_join(self, current, task):
-        try:
-            return await task._aio_task
-        except asyncio.CancelledError:
-            if task._exception is not None:
-                raise task._exception from None
-            raise
-
-    async def nio_condition_wait(self, current, condition):
-        _init_condition(condition)
-        cond = condition._aio_contition
-        await cond.acquire()
-        try:
-            await cond.wait()
-        finally:
-            cond.release()
-
-    async def nio_condition_notify(self, current, condition, n=1):
-        _init_condition(condition)
-        cond = condition._aio_contition
-        await cond.acquire()
-        try:
-            cond.notify(n)
-        finally:
-            cond.release()
-
-    async def nio_condition_notify_all(self, current, condition):
-        _init_condition(condition)
-        cond = condition._aio_contition
-        await cond.acquire()
-        try:
-            cond.notify_all()
-        finally:
-            cond.release()
-
-
-def _init_condition(self, condition):
-    if condition._aio_contition is None:
-        condition._aio_contition = asyncio.Condition()
+        return await task._aio_task

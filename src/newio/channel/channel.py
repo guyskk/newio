@@ -4,22 +4,21 @@ from .error import ChannelClosed
 from .controller import ChannelController
 from .newio_broker import NewioBroker
 from .thread_broker import ThreadBroker
-from .asyncio_broker import AsyncioBroker
 
 
 LOG = logging.getLogger(__name__)
 
 
 class Channel:
-    """Message channel for communicating between threads/newio/asyncio"""
+    """Message channel for communicating between threads/newio"""
 
     def __init__(self, bufsize=None):
         self.controller = ChannelController(bufsize)
         self._thread_broker = ThreadBroker(self.controller)
         self._newio_broker = NewioBroker(self.controller)
-        self._asyncio_broker = AsyncioBroker(self.controller)
+        self.sync = SyncChannel(self._thread_broker)
 
-    def close(self):
+    async def close(self):
         self.controller.close()
 
     async def __aenter__(self):
@@ -28,10 +27,9 @@ class Channel:
         return self
 
     async def __aexit__(self, *exc_info):
-        self.close()
+        await self.close()
         await self._thread_broker.join()
         await self._newio_broker.join()
-        await self._asyncio_broker.join()
         self.controller.destroy()
 
     async def send(self, item):
@@ -49,32 +47,22 @@ class Channel:
             except ChannelClosed:
                 break
 
-    async def asyncio_iter(self):
+
+class SyncChannel:
+    def __init__(self, broker):
+        self._broker = broker
+
+    def __iter__(self):
         while True:
             try:
-                yield (await self.asyncio_recv())
+                yield self.recv()
             except ChannelClosed:
                 break
 
-    async def asyncio_send(self, item):
-        """send in asyncio"""
-        await self._asyncio_broker.send(item)
-
-    async def asyncio_recv(self):
-        """recv in asyncio"""
-        return await self._asyncio_broker.recv()
-
-    def thread_iter(self):
-        while True:
-            try:
-                yield self.thread_recv()
-            except ChannelClosed:
-                break
-
-    def thread_send(self, item):
+    def send(self, item):
         """send in thread"""
-        self._thread_broker.send(item)
+        self._broker.send(item)
 
-    def thread_recv(self):
+    def recv(self):
         """recv in thread"""
-        return self._thread_broker.recv()
+        return self._broker.recv()

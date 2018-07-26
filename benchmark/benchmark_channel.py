@@ -4,9 +4,8 @@ from itertools import product
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 
-from newio import run_in_asyncio, run_in_thread, spawn
+from newio import run_in_thread, spawn, run
 from newio.channel import Channel
-from newio_kernel import run
 
 
 _QUEUE_CLOSE = object()
@@ -31,39 +30,25 @@ def queue_consumer(queue):
 
 
 async def thread_producer(channel):
+    channel = channel.sync
+
     def _producer():
         for i in range(NUM_ITEMS):
-            channel.thread_send(1)
+            channel.send(1)
 
     return await run_in_thread(_producer)
 
 
 async def thread_consumer(channel):
+    channel = channel.sync
+
     def _consumer():
         total = 0
-        for i in channel.thread_iter():
+        for i in channel:
             total += i
         return total
 
     return await run_in_thread(_consumer)
-
-
-async def asyncio_producer(channel):
-    async def _producer():
-        for i in range(NUM_ITEMS):
-            await channel.asyncio_send(1)
-
-    return await run_in_asyncio(_producer())
-
-
-async def asyncio_consumer(channel):
-    async def _consumer():
-        total = 0
-        async for i in channel.asyncio_iter():
-            total += i
-        return total
-
-    return await run_in_asyncio(_consumer())
 
 
 async def newio_producer(channel):
@@ -99,7 +84,7 @@ def benchmark_queue(num_producer, num_consumer):
     assert total == len(producers) * NUM_ITEMS
     executor.shutdown()
     t3 = time.monotonic()
-    return [t1 - t0, t2 - t1, t3 - t2]
+    return [total, t1 - t0, t2 - t1, t3 - t2]
 
 
 async def benchmark_channel(producer, num_producer, consumer, num_consumer):
@@ -114,20 +99,18 @@ async def benchmark_channel(producer, num_producer, consumer, num_consumer):
         t1 = time.monotonic()
         for task in producers:
             await task.join()
-            assert not task.error, task.error
-        channel.close()
+        await channel.close()
         t2 = time.monotonic()
+        total = 0
         for task in consumers:
-            await task.join()
-            assert not task.error, task.error
-    total = sum([t.result for t in consumers])
+            total += await task.join()
     assert total == len(producers) * NUM_ITEMS
     t3 = time.monotonic()
-    return [t1 - t0, t2 - t1, t3 - t2]
+    return [total, t1 - t0, t2 - t1, t3 - t2]
 
 
-producers = [thread_producer, newio_producer, asyncio_producer]
-consumers = [thread_consumer, newio_consumer, asyncio_consumer]
+producers = [thread_producer, newio_producer]
+consumers = [thread_consumer, newio_consumer]
 
 
 def sout(text):
@@ -141,7 +124,7 @@ class Printer:
         self.results = []
 
     def format_title(self, p, pn, c, cn):
-        title = f'{p:>16} {pn:>1d} : {cn:>1d} {c:>16}'
+        title = f'{p:>15} {pn:>1d} : {cn:>1d} {c:>15}'
         return f'{title:>40}'
 
     def print_title(self, p, pn, c, cn):
@@ -149,8 +132,10 @@ class Printer:
         sout(self.format_title(p, pn, c, cn))
 
     def format_result(self, result):
+        total = result[0]
+        result = result[1:]
         t_total = sum(result)
-        qps = '{:>7d}'.format(int(NUM_ITEMS / t_total))
+        qps = '{:>7d}'.format(int(total / t_total))
         t_setup, t_producer, t_consumer = [f'{x:.3f}' for x in result]
         t = f'{t_setup} + {t_producer} + {t_consumer}'
         return f' => {t} = {t_total:.3f}  {qps} QPS'
@@ -161,11 +146,13 @@ class Printer:
 
     def _sort_key(self, title_result):
         _, result = title_result
-        return sum(result)
+        total = result[0]
+        t_total = sum(result[1:])
+        return total / t_total
 
     def print_sorted(self):
         print('-' * 80)
-        items = sorted(zip(self.titles, self.results), key=self._sort_key)
+        items = sorted(zip(self.titles, self.results), key=self._sort_key, reverse=True)
         for title, result in items:
             sout(self.format_title(*title))
             sout(self.format_result(result) + '\n')
