@@ -22,7 +22,7 @@ __all__ = (
     'current_task',
     'run_in_thread',
     'run_in_process',
-    'timeout',
+    'timeout_after',
     'open_nursery',
 )
 
@@ -35,17 +35,20 @@ spawn = _syscall.nio_spawn
 current_task = _syscall.nio_current_task
 
 
-class timeout:
+def timeout_after(seconds: float):
     """Async context manager for task timeout
 
     Usage:
 
-        async with timeout(3) as is_timeout:
+        async with timeout_after(3) as is_timeout:
             await sleep(5)
         if is_timeout:
             # task timeout
     """
+    return Timeout(seconds)
 
+
+class Timeout:
     def __init__(self, seconds: float):
         self._seconds = seconds
         self._timer = async_timeout.timeout(seconds)
@@ -54,7 +57,7 @@ class timeout:
         return self._timer.expired
 
     def __repr__(self):
-        return f'<timeout {bool(self)} at {hex(id(self))}>'
+        return f'<Timeout {bool(self)} at {hex(id(self))}>'
 
     async def __aenter__(self):
         await self._timer.__aenter__()
@@ -70,17 +73,16 @@ class timeout:
 
 
 def open_nursery():
-    return Nursery()
-
-
-class Nursery:
     """Nursery is manager of tasks, it will take care of it spawned tasks.
 
     All tasks spawned by the nursery are ensure stoped after nursery exited.
     When nursery exiting, it will join spawned tasks, if nursery raises,
     it will cancel spawned tasks.
     """
+    return Nursery()
 
+
+class Nursery:
     def __init__(self):
         self._tasks = []
         self._is_closed = False

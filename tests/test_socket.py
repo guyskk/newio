@@ -1,6 +1,6 @@
 from array import array
 
-from newio import spawn, sleep, timeout, open_nursery, CancelledError
+from newio import spawn, sleep, timeout_after, open_nursery, CancelledError
 from newio.socket import (
     socket,
     socketpair,
@@ -129,7 +129,7 @@ async def test_accept_timeout():
         sock.bind(address)
         sock.listen(1)
         results.append('accept wait')
-        async with timeout(0.1) as is_timeout:
+        async with timeout_after(0.1) as is_timeout:
             client, addr = await sock.accept()
             results.append('not here')
         if is_timeout:
@@ -178,7 +178,7 @@ async def test_recv_timeout():
         await accepting_event.set()
         client, addr = await sock.accept()
         results.append('recv wait')
-        async with timeout(0.1) as is_timeout:
+        async with timeout_after(0.1) as is_timeout:
             await client.recv(8192)
             results.append('not here')
         if is_timeout:
@@ -262,7 +262,7 @@ async def test_recvfrom_timeout():
         sock.setsockopt(SOL_SOCKET, SO_REUSEADDR, True)
         sock.bind(address)
         results.append('recvfrom wait')
-        async with timeout(0.1) as is_timeout:
+        async with timeout_after(0.1) as is_timeout:
             await sock.recvfrom(8192)
             results.append('not here')
         if is_timeout:
