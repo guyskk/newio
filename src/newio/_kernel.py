@@ -50,38 +50,33 @@ class Kernel:
         self.thread_executor = ThreadPoolExecutor(DEFAULT_MAX_NUM_THREAD)
         self.process_executor = ProcessPoolExecutor(DEFAULT_MAX_NUM_PROCESS)
 
-    async def main(self, coro):
-        try:
-            return await coro
-        finally:
-            self.loop.stop()
-
-    def run(self, coro):
+    def run(self, corofunc, *args, **kwargs):
+        main_task = self._create_task(corofunc, *args, **kwargs)
         _set_kernel(self)
         try:
-            return self._run_complete(coro)
+            return self._run_complete(main_task)
         finally:
             _set_kernel(None)
             self.close()
 
-    def _run_complete(self, coro):
-        main_task = self._create_task(self.main(coro))
+    def _run_complete(self, main_task):
+        aio_main_task = main_task._aio_task
         try:
             if self.monitor:
                 with aiomonitor.start_monitor(loop=self.loop):
-                    self.loop.run_forever()
+                    self.loop.run_until_complete(aio_main_task)
             else:
-                self.loop.run_forever()
+                self.loop.run_until_complete(aio_main_task)
         except BaseException:
             # 处理KeyboardInterrupt等异常，保证main_task完整运行结束
-            main_task._aio_task.cancel()
+            aio_main_task.cancel()
             try:
-                self.loop.run_until_complete(main_task._aio_task)
+                self.loop.run_until_complete(aio_main_task)
             except asyncio.CancelledError:
                 pass  # ignore
             raise
         else:
-            return main_task._aio_task.result()
+            return aio_main_task.result()
 
     def close(self):
         self.loop.close()

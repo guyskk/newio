@@ -1,4 +1,4 @@
-'''Wrapper around built-in SSL module'''
+"""Wrapper around built-in SSL module"""
 
 __all__ = ()
 
@@ -9,14 +9,7 @@ try:
     from ssl import *  # noqa: F401,F403
 except ImportError:
     _ssl = None
-
-    # We need these exceptions defined, even if ssl is not available.
-    class SSLWantReadError(Exception):
-        pass
-
-    class SSLWantWriteError(Exception):
-        pass
-
+    from ._socket import SSLWantReadError, SSLWantWriteError  # noqa: F401
 
 from .api import run_in_thread
 from ._socket import Socket
