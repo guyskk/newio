@@ -25,5 +25,4 @@ async def test_io():
     task1 = await nio.spawn(server_task())
     task2 = await nio.spawn(client_task(b'x'))
     await task1.join()
-    await task2.join()
-    assert task2.result == b'x'
+    await task2.join() == b'x'

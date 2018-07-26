@@ -1,9 +1,11 @@
+exclude: src/newio/compat/contextlib.py
 repos:
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: v1.2.3
   hooks:
   - id: trailing-whitespace
   - id: end-of-file-fixer
+    exclude: .bumpversion.cfg
   - id: check-byte-order-marker
   - id: check-case-conflict
   - id: check-added-large-files

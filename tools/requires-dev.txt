@@ -1,7 +1,0 @@
-invoke==1.0.0
-pytest==3.6.1
-pytest-cov==2.5.1
-coloredlogs==10.0
-twine==1.11.0
-pre-commit==1.10.2
-codecov==2.0.15

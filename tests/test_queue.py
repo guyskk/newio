@@ -29,7 +29,5 @@ async def test_queue():
     await p2.join()
     for i in range(3):
         await queue.put(None)
-    await c1.join()
-    await c2.join()
-    await c3.join()
-    assert sum([c1.result, c2.result, c3.result]) == 200
+    results = [await c1.join(), await c2.join(), await c3.join()]
+    assert sum(results) == 200

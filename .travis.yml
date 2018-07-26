@@ -13,7 +13,7 @@ install:
 
 script:
   - pre-commit run --all-files
-  - pytest --cov newio --cov newio_kernel
+  - pytest --cov newio
   # test install
   - cd $TRAVIS_BUILD_DIR
   - inv build
