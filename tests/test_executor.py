@@ -20,7 +20,7 @@ async def process_sleep_task(seconds):
 @run_it
 async def test_executor(sleep_task):
     cost = await run_sleep_task(sleep_task, seconds=0.2)
-    assert 0.2 <= cost < 0.25
+    assert 0.2 <= cost < 0.3
 
 
 @pytest.mark.parametrize('sleep_task', [process_sleep_task])
