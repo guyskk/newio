@@ -1,6 +1,6 @@
-from contextlib import contextmanager
 from socket import SOL_SOCKET, SO_ERROR
 
+from .contextlib import contextmanager
 from .api import wait_read, wait_write
 
 try:

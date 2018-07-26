@@ -1,11 +1,11 @@
 """Newio common API for users"""
-from contextlib import suppress
 import asyncio
 import async_timeout
 
 from . import _syscall
 from ._syscall import Task
 from ._kernel import Runner
+from .contextlib import suppress
 
 run = Runner()
 
