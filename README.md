@@ -1,4 +1,4 @@
-# Newio: New Async API and Runtime for Python!
+# Newio: New Async API for Python!
 
 [![travis-ci](https://api.travis-ci.org/guyskk/newio.svg)](https://travis-ci.org/guyskk/newio) [![codecov](https://codecov.io/gh/guyskk/newio/branch/master/graph/badge.svg)](https://codecov.io/gh/guyskk/newio)
 
@@ -6,8 +6,7 @@
 
 ```python
 import os
-from newio import socket, spawn
-from newio_kernel import run
+from newio import socket, spawn, run
 
 async def echo_handler(client, address):
     async with client:
