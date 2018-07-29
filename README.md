@@ -34,4 +34,4 @@ if __name__ == '__main__':
 
 Note: Only support python 3.6+
 
-    pip install 'newio[kernel]'
+    pip install 'newio>=0.6.1'
