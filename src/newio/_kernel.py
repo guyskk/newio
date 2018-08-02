@@ -70,10 +70,11 @@ class Kernel:
         except BaseException:
             # 处理KeyboardInterrupt等异常，保证main_task完整运行结束
             aio_main_task.cancel()
-            try:
-                self.loop.run_until_complete(aio_main_task)
-            except asyncio.CancelledError:
-                pass  # ignore
+            if not aio_main_task.done():
+                try:
+                    self.loop.run_until_complete(aio_main_task)
+                except asyncio.CancelledError:
+                    pass  # ignore
             raise
         else:
             return aio_main_task.result()
