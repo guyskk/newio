@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='newio',
-    version='0.6.1',
+    version='0.6.2',
     description='Newio',
     url='https://github.com/guyskk/newio',
     author='guyskk',
