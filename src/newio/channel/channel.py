@@ -16,7 +16,7 @@ class Channel:
         self.controller = ChannelController(bufsize)
         self._thread_broker = ThreadBroker(self.controller)
         self._newio_broker = NewioBroker(self.controller)
-        self.sync = SyncChannel(self._thread_broker)
+        self.sync = SyncChannel(self)
 
     async def close(self):
         self.controller.close()
@@ -49,8 +49,9 @@ class Channel:
 
 
 class SyncChannel:
-    def __init__(self, broker):
-        self._broker = broker
+    def __init__(self, channel):
+        self._channel = channel
+        self._broker = channel._thread_broker
 
     def __iter__(self):
         while True:
@@ -66,3 +67,6 @@ class SyncChannel:
     def recv(self):
         """recv in thread"""
         return self._broker.recv()
+
+    def close(self):
+        self._channel.controller.close()
